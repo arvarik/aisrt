@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  srtgen:
+    build: .
+    container_name: srtgen
+    # CRITICAL: Prevents CTranslate2 shared-memory core dumps when processing large files.
+    shm_size: '4gb'
+    environment:
+      # Expose all GPUs to the container.
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # (Optional) You can override the hardware detector by forcing variables here:
+      # - FORCE_DEVICE=cuda
+      # - FORCE_COMPUTE_TYPE=float16
+    volumes:
+      # Map the target NAS media directory to /media
+      # Ensure this is mounted rw (read-write) so the tool can write SRT files.
+      - /mnt/user/media/movies:/media:rw
+      
+      # Map the internal SQLite state database directory to a local, fast SSD.
+      # WARNING: Do NOT mount this to an NFS/SMB network share! SQLite WAL mode will corrupt.
+      - ./srtgen_data:/root/.config/srtgen:rw
+      
+    # NVIDIA Container Toolkit integration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+              
+    # Command to run on startup. 
+    # Example: Run the live pipeline on /media, skipping files younger than 60 mins.
+    command: ["srtgen", "run", "/media", "--min-age-mins", "60"]
+    
+    # Optional: If you only want to process the queue once and exit, use 'no'.
+    # If you want it to behave like a daemon and restart, use 'unless-stopped'.
+    # NOTE: The daemon does not currently loop indefinitely on its own. It scans, processes, and exits.
+    # You could orchestrate a cronjob to start the container every night.
+    restart: "no"
