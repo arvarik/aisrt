@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class HardwareConfig(BaseModel):
@@ -43,7 +44,7 @@ class FilterConfig(BaseModel):
     )
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseSettings):
     """Main application configuration."""
 
     media_dir: Path = Field(
@@ -57,5 +58,23 @@ class AppConfig(BaseModel):
         default=False,
         description="If True, only scan and report what would be done (no execution).",
     )
+    translate: bool = Field(
+        default=False,
+        description="If True, translates foreign audio to English using Whisper's translate task.",
+    )
+    watch: bool = Field(
+        default=False,
+        description="If True, runs the pipeline continuously in daemon mode.",
+    )
+    watch_interval_mins: int = Field(
+        default=60,
+        description="Interval in minutes between scans when running in watch mode.",
+    )
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     filters: FilterConfig = Field(default_factory=FilterConfig)
+
+    model_config = SettingsConfigDict(
+        env_prefix="SRTGEN_",
+        env_nested_delimiter="__",
+        extra="ignore",
+    )

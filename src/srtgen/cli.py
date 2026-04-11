@@ -99,6 +99,13 @@ async def _run_scan(config: AppConfig) -> None:
 def run(
     media_dir: Annotated[Path, typer.Argument(help="Root directory containing media files")],
     min_age_mins: Annotated[int, typer.Option(help="Minimum file age in minutes")] = 15,
+    translate: Annotated[
+        bool, typer.Option("--translate", help="Enable AI translation to English")
+    ] = False,
+    watch: Annotated[bool, typer.Option("--watch", help="Run continuously in daemon mode")] = False,
+    watch_interval: Annotated[
+        int, typer.Option("--watch-interval", help="Minutes between scans in watch mode")
+    ] = 60,
     force_device: Annotated[str | None, typer.Option(help="Force specific device")] = None,
     force_model: Annotated[str | None, typer.Option(help="Force specific model")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable debug logging")] = False,
@@ -112,6 +119,9 @@ def run(
     config = AppConfig(
         media_dir=media_dir,
         dry_run=False,
+        translate=translate,
+        watch=watch,
+        watch_interval_mins=watch_interval,
         hardware=hw_config,
         filters=flt_config,
     )
@@ -135,9 +145,24 @@ def run(
         from srtgen.pipeline import Pipeline
 
         async with StateTracker(config.db_path) as tracker:
-            engine = DiscoveryEngine(config.media_dir, config.filters, tracker)
-            pipeline = Pipeline(engine, cpu_cores=profile.physical_cores)
-            await pipeline.run()
+            while True:
+                engine = DiscoveryEngine(config.media_dir, config.filters, tracker)
+                pipeline = Pipeline(
+                    engine, cpu_cores=profile.physical_cores, translate=config.translate
+                )
+                await pipeline.run()
+
+                if not config.watch:
+                    break
+
+                console.print(
+                    f"\n[bold yellow]Sleeping for {config.watch_interval_mins} "
+                    f"minutes...[/bold yellow]"
+                )
+                await asyncio.sleep(config.watch_interval_mins * 60)
+                console.print(
+                    f"\n[bold cyan]Waking up and scanning Directory: {config.media_dir}[/bold cyan]"
+                )
 
     try:
         asyncio.run(_execute_pipeline())

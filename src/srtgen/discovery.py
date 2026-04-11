@@ -151,7 +151,7 @@ class DiscoveryEngine:
             "-select_streams",
             "s",
             "-show_entries",
-            "stream=index:stream_tags=language",
+            "stream=index,codec_name:stream_tags=language",
             "-of",
             "json",
             str(video_path),
@@ -173,10 +173,19 @@ class DiscoveryEngine:
             streams = data.get("streams", [])
 
             for stream in streams:
+                codec = stream.get("codec_name", "").lower()
                 tags = stream.get("tags", {})
                 lang = tags.get("language", "").lower()
+
+                # Only skip if we find a text-based subtitle track in the target language.
+                # Image-based subs (hdmv_pgs_subtitle) force transcodes on many players.
                 if lang in self.config.target_languages:
-                    return True
+                    if codec in ["subrip", "ass", "mov_text", "webvtt"]:
+                        return True
+                    else:
+                        logger.debug(
+                            f"Ignoring embedded {codec} subtitle in {video_path} (forces transcode)"
+                        )
 
         except FileNotFoundError:
             logger.error("ffprobe not found. Please ensure FFmpeg is installed and in PATH.")

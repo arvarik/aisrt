@@ -21,15 +21,19 @@ class InferenceJob:
 class Pipeline:
     """Manages the bounded queues and concurrent workers for the STT pipeline."""
 
-    def __init__(self, discovery_engine: DiscoveryEngine, cpu_cores: int) -> None:
+    def __init__(
+        self, discovery_engine: DiscoveryEngine, cpu_cores: int, translate: bool = False
+    ) -> None:
         """Initialize the pipeline.
 
         Args:
             discovery_engine: The NAS-safe file crawler.
             cpu_cores: Used to set the maxsize of the extraction queue.
+            translate: If True, uses Whisper to translate foreign audio to English.
         """
         self.discovery = discovery_engine
         self.target_languages = discovery_engine.config.target_languages
+        self.translate = translate
 
         # Bounded queues prevent Out-Of-Memory errors and NAS I/O thrashing
         # GPU inference is the true bottleneck, so extraction only needs a tiny buffer
@@ -134,6 +138,7 @@ class Pipeline:
                         raise RuntimeError("Whisper model is not initialized.")
 
                     transcribe_kwargs = {
+                        "task": "translate" if self.translate else "transcribe",
                         "beam_size": 5,
                         "vad_filter": True,
                         "vad_parameters": {"min_silence_duration_ms": 500},
