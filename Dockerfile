@@ -43,7 +43,7 @@ RUN pip install --no-cache-dir .
 
 # Create a directory for the SQLite state database
 # This should be mapped to a local volume to prevent DB corruption over network shares
-RUN mkdir -p /root/.config/srtgen
+RUN mkdir -p /root/.config/aisrt
 
 # Prevent C libraries from thrashing threads, which causes GIL lockups
 ENV OMP_NUM_THREADS=1
@@ -54,4 +54,4 @@ ENV OPENBLAS_NUM_THREADS=1
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command if none is provided in docker-compose
-CMD ["srtgen", "--help"]
+CMD ["aisrt", "--help"]

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from srtgen.config import FilterConfig
-from srtgen.state import StateTracker
+from aisrt.config import FilterConfig
+from aisrt.state import StateTracker
 
 
 @dataclass

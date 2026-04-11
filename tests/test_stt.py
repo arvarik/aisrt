@@ -2,11 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
-from srtgen.hardware import ModelConfig
-from srtgen.stt import STTWorker
+from aisrt.hardware import ModelConfig
+from aisrt.stt import STTWorker
 
 
-@patch("srtgen.stt.WhisperModel")
+@patch("aisrt.stt.WhisperModel")
 def test_stt_worker_singleton(mock_whisper_model: MagicMock) -> None:
     """Test that STTWorker behaves as a singleton and initializes correctly."""
     # Reset singleton for clean test

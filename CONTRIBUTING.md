@@ -32,7 +32,7 @@ We maintain strict enterprise-grade code quality. **All pull requests MUST pass 
 2. **Type Checking (Mypy):**
    We enforce strict typing. Ensure you have fully typed your additions.
    ```bash
-   mypy src/srtgen tests
+   mypy src/aisrt tests
    ```
 3. **Unit Tests (Pytest):**
    Ensure your changes do not break existing functionality. If adding a new feature, please include corresponding `pytest-asyncio` tests.

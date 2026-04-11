@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from srtgen.config import FilterConfig
-from srtgen.discovery import DiscoveryEngine
-from srtgen.state import FileState, StateTracker
+from aisrt.config import FilterConfig
+from aisrt.discovery import DiscoveryEngine
+from aisrt.state import FileState, StateTracker
 
 
 @pytest.fixture

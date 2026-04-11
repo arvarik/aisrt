@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
-from srtgen.config import HardwareConfig
-from srtgen.hardware import HardwareProfile, HardwareProfiler, ModelRouter, setup_thread_safety
+from aisrt.config import HardwareConfig
+from aisrt.hardware import HardwareProfile, HardwareProfiler, ModelRouter, setup_thread_safety
 
 
 def test_hardware_profile_apple_silicon() -> None:
@@ -96,13 +96,13 @@ def test_model_router_overrides() -> None:
     assert model_cfg.model_name == "tiny.en"
 
 
-@patch("srtgen.hardware.psutil")
+@patch("aisrt.hardware.psutil")
 def test_profiler_execution(mock_psutil: MagicMock) -> None:
     """Test the HardwareProfiler actually builds a profile without crashing."""
     mock_psutil.virtual_memory.return_value.total = 16 * (1024**3)
     mock_psutil.cpu_count.return_value = 4
 
-    with patch("srtgen.hardware.platform.system", return_value="Linux"):
+    with patch("aisrt.hardware.platform.system", return_value="Linux"):
         profile = HardwareProfiler.profile()
         assert profile.ram_gb == 16.0
         assert profile.physical_cores == 4

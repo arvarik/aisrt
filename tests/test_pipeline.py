@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 import pytest
 
-from srtgen.config import FilterConfig
-from srtgen.discovery import DiscoveryEngine, MediaFile
-from srtgen.pipeline import Pipeline
+from aisrt.config import FilterConfig
+from aisrt.discovery import DiscoveryEngine, MediaFile
+from aisrt.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ async def test_pipeline_execution(mock_discovery: DiscoveryEngine) -> None:
     """Test that the orchestrator routes tasks through extractors and inference correctly."""
     pipeline = Pipeline(mock_discovery, cpu_cores=2)
 
-    with patch("srtgen.pipeline.AudioExtractor") as mock_ext:
+    with patch("aisrt.pipeline.AudioExtractor") as mock_ext:
         mock_ext.get_audio_track_index = AsyncMock(return_value=0)
         mock_ext.extract_audio_to_memory = AsyncMock(return_value=np.zeros(10))
 

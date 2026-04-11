@@ -1,1 +1,1 @@
-"""Test suite for srtgen."""
+"""Test suite for aisrt."""

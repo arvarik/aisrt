@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import psutil
 from loguru import logger
 
-from srtgen.config import HardwareConfig
+from aisrt.config import HardwareConfig
 
 
 @dataclass

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 from loguru import logger
 
-from srtgen.discovery import DiscoveryEngine, MediaFile
-from srtgen.extractor import AudioExtractor
+from aisrt.discovery import DiscoveryEngine, MediaFile
+from aisrt.extractor import AudioExtractor
 
 
 @dataclass
@@ -123,8 +123,8 @@ class Pipeline:
 
     async def _inference_worker(self) -> None:
         """Pops NumPy arrays and performs AI inference."""
-        from srtgen.assembly import AtomicWriter, SRTFormatter
-        from srtgen.stt import STTWorker
+        from aisrt.assembly import AtomicWriter, SRTFormatter
+        from aisrt.stt import STTWorker
 
         logger.debug("Inference worker (GPU/Singleton) started.")
         stt_worker = STTWorker()

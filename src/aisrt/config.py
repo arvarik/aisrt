@@ -51,7 +51,7 @@ class AppConfig(BaseSettings):
         description="The root directory containing media to scan.",
     )
     db_path: Path = Field(
-        default_factory=lambda: Path.home() / ".config" / "srtgen" / "state.db",
+        default_factory=lambda: Path.home() / ".config" / "aisrt" / "state.db",
         description="Path to the local SQLite state database.",
     )
     dry_run: bool = Field(
@@ -74,7 +74,7 @@ class AppConfig(BaseSettings):
     filters: FilterConfig = Field(default_factory=FilterConfig)
 
     model_config = SettingsConfigDict(
-        env_prefix="SRTGEN_",
+        env_prefix="AISRT_",
         env_nested_delimiter="__",
         extra="ignore",
     )

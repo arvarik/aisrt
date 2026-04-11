@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from srtgen.state import StateTracker
+from aisrt.state import StateTracker
 
 
 @pytest.fixture

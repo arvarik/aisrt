@@ -10,10 +10,10 @@ from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from srtgen.config import AppConfig, FilterConfig, HardwareConfig
-from srtgen.discovery import DiscoveryEngine
-from srtgen.hardware import HardwareProfiler, ModelRouter, setup_thread_safety
-from srtgen.state import StateTracker
+from aisrt.config import AppConfig, FilterConfig, HardwareConfig
+from aisrt.discovery import DiscoveryEngine
+from aisrt.hardware import HardwareProfiler, ModelRouter, setup_thread_safety
+from aisrt.state import StateTracker
 
 app = typer.Typer(help="Ultimate SRT Generator", add_completion=False)
 console = Console()
@@ -133,7 +133,7 @@ def run(
     model_cfg = ModelRouter.get_config(profile, config.hardware)
 
     # Initialize the STT singleton before starting async loop
-    from srtgen.stt import STTWorker
+    from aisrt.stt import STTWorker
 
     stt_worker = STTWorker()
     stt_worker.initialize(model_cfg)
@@ -142,7 +142,7 @@ def run(
 
     # We define a wrapper to inject the db context manager and the pipeline
     async def _execute_pipeline() -> None:
-        from srtgen.pipeline import Pipeline
+        from aisrt.pipeline import Pipeline
 
         async with StateTracker(config.db_path) as tracker:
             while True:

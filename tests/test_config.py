@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from srtgen.config import AppConfig, FilterConfig, HardwareConfig
+from aisrt.config import AppConfig, FilterConfig, HardwareConfig
 
 
 def test_hardware_config_defaults() -> None:
@@ -30,7 +30,7 @@ def test_app_config_defaults() -> None:
     config = AppConfig(media_dir=media_dir)
     assert config.media_dir == media_dir
     assert config.dry_run is False
-    assert config.db_path == Path.home() / ".config" / "srtgen" / "state.db"
+    assert config.db_path == Path.home() / ".config" / "aisrt" / "state.db"
     assert isinstance(config.hardware, HardwareConfig)
     assert isinstance(config.filters, FilterConfig)
 

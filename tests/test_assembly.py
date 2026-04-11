@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import patch
 
-from srtgen.assembly import AtomicWriter, SRTFormatter, _format_timestamp
+from aisrt.assembly import AtomicWriter, SRTFormatter, _format_timestamp
 
 
 @dataclass

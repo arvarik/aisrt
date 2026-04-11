@@ -92,7 +92,7 @@ segments, info = model.transcribe(
 1.  Initialize with Poetry (`pyproject.toml`).
 2.  Define Pydantic v2 Configuration schemas (`AppConfig`).
 3.  Implement `StateTracker` using `aiosqlite`.
-4.  Path strictly bound to `~/.config/srtgen/state.db`.
+4.  Path strictly bound to `~/.config/aisrt/state.db`.
 5.  Execute `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;` upon connection.
 
 ### Phase 2: Hardware Profiler & AI Routing

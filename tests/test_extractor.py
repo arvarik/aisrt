@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 import pytest
 
-from srtgen.extractor import AudioExtractor
+from aisrt.extractor import AudioExtractor
 
 
 @pytest.mark.asyncio

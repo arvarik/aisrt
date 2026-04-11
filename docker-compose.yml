@@ -1,9 +1,9 @@
 version: "3.8"
 
 services:
-  srtgen:
+  aisrt:
     build: .
-    container_name: srtgen
+    container_name: aisrt
     # CRITICAL: Prevents CTranslate2 shared-memory core dumps when processing large files.
     shm_size: '4gb'
     environment:
@@ -20,7 +20,7 @@ services:
       
       # Map the internal SQLite state database directory to a local, fast SSD.
       # WARNING: Do NOT mount this to an NFS/SMB network share! SQLite WAL mode will corrupt.
-      - ./srtgen_data:/root/.config/srtgen:rw
+      - ./aisrt_data:/root/.config/aisrt:rw
       
     # NVIDIA Container Toolkit integration
     deploy:
@@ -33,7 +33,7 @@ services:
               
     # Command to run on startup. 
     # Example: Run the live pipeline on /media, skipping files younger than 60 mins.
-    command: ["srtgen", "run", "/media", "--min-age-mins", "60"]
+    command: ["aisrt", "run", "/media", "--min-age-mins", "60"]
     
     # Optional: If you only want to process the queue once and exit, use 'no'.
     # If you want it to behave like a daemon and restart, use 'unless-stopped'.

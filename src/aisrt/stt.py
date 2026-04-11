@@ -6,7 +6,7 @@ from typing import Any
 from faster_whisper import WhisperModel
 from loguru import logger
 
-from srtgen.hardware import ModelConfig
+from aisrt.hardware import ModelConfig
 
 
 class STTWorker:

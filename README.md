@@ -39,7 +39,7 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
     ```yaml
     volumes:
       - /mnt/user/media/movies:/media:rw
-      - ./srtgen_data:/root/.config/srtgen:rw
+      - ./aisrt_data:/root/.config/aisrt:rw
     ```
 3.  Deploy:
     ```bash
@@ -76,14 +76,14 @@ The application features a beautifully formatted CLI built on `Typer` and `Rich`
 Safely scan a directory to see exactly what hardware will be loaded and what files will be processed, without actually running the AI model.
 
 ```bash
-srtgen scan /path/to/movies --min-age-mins 60 --verbose
+aisrt scan /path/to/movies --min-age-mins 60 --verbose
 ```
 
 ### Live Run
 Execute the extraction and inference pipeline.
 
 ```bash
-srtgen run /path/to/movies
+aisrt run /path/to/movies
 ```
 
 ### CLI Overrides & Environment Variables
@@ -91,16 +91,16 @@ You can manually override the hardware auto-detector and execution options.
 
 **Via CLI:**
 ```bash
-srtgen run /path/to/movies --force-device cuda --force-model large-v3-turbo --translate --watch --watch-interval 60
+aisrt run /path/to/movies --force-device cuda --force-model large-v3-turbo --translate --watch --watch-interval 60
 ```
 
 **Via Docker Environment Variables:**
 Since `AppConfig` utilizes `pydantic-settings`, you can configure the daemon entirely through your `docker-compose.yml`:
-*   `SRTGEN_TRANSLATE=True` (Auto-dub foreign audio into English)
-*   `SRTGEN_WATCH=True` (Run 24/7 as a daemon)
-*   `SRTGEN_WATCH_INTERVAL_MINS=60` (Time between library scans)
-*   `SRTGEN_FILTERS__MIN_AGE_MINS=30` (Skip active torrent/usenet downloads)
-*   `SRTGEN_HARDWARE__FORCE_MODEL=large-v3-turbo`
+*   `AISRT_TRANSLATE=True` (Auto-dub foreign audio into English)
+*   `AISRT_WATCH=True` (Run 24/7 as a daemon)
+*   `AISRT_WATCH_INTERVAL_MINS=60` (Time between library scans)
+*   `AISRT_FILTERS__MIN_AGE_MINS=30` (Skip active torrent/usenet downloads)
+*   `AISRT_HARDWARE__FORCE_MODEL=large-v3-turbo`
 
 ---
 
@@ -117,7 +117,7 @@ poetry install   # Or pip install -e ".[dev]"
 ```bash
 ruff check .           # Linter
 ruff format .          # Formatter
-mypy src/srtgen tests  # Strict Type Checking
+mypy src/aisrt tests  # Strict Type Checking
 pytest tests           # Asynchronous Unit Tests
 ```
 
