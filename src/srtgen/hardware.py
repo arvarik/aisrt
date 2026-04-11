@@ -85,12 +85,12 @@ class ModelRouter:
     def get_config(profile: HardwareProfile, overrides: HardwareConfig) -> ModelConfig:
         """Determine the best model configuration, respecting overrides."""
         # 1. Start with the logic matrix defaults
-        if profile.has_cuda and profile.vram_gb > 4.0:
+        if profile.has_cuda and profile.vram_gb >= 6.0:
             model_name = "large-v3-turbo"
             device = "cuda"
             compute_type = "float16"
             cpu_threads = 4  # Minimal threads for GPU orchestration
-        elif profile.has_cuda and profile.vram_gb >= 2.0:
+        elif profile.has_cuda and profile.vram_gb >= 4.0:
             model_name = "large-v3-turbo"
             device = "cuda"
             compute_type = "int8_float16"

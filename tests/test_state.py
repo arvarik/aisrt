@@ -36,7 +36,6 @@ async def test_update_and_get_state(db_path: Path) -> None:
         await tracker.update_state(
             file_path="/movies/movie.mkv",
             inode=12345,
-            device_id=1,
             mtime=1000.0,
             size=5000,
             status="COMPLETED",
@@ -47,40 +46,39 @@ async def test_update_and_get_state(db_path: Path) -> None:
         assert state is not None
         assert state.file_path == "/movies/movie.mkv"
         assert state.inode == 12345
+        assert state.size == 5000
         assert state.status == "COMPLETED"
         assert state.model_used == "large-v3-turbo"
 
 
 @pytest.mark.asyncio
 async def test_check_hardlink_processed(db_path: Path) -> None:
-    """Test the inode/device_id deduplication logic."""
+    """Test the inode/size deduplication logic."""
     async with StateTracker(db_path) as tracker:
         await tracker.update_state(
             file_path="/movies/movie_link1.mkv",
             inode=999,
-            device_id=1,
             mtime=1000.0,
             size=5000,
             status="COMPLETED",
         )
 
-        # Should be true because we inserted the exact inode/device pair
-        assert await tracker.check_hardlink_processed(999, 1) is True
+        # Should be true because we inserted the exact inode/size pair
+        assert await tracker.check_hardlink_processed(999, 5000) is True
 
-        # Should be false for different inode or device
-        assert await tracker.check_hardlink_processed(888, 1) is False
-        assert await tracker.check_hardlink_processed(999, 2) is False
+        # Should be false for different inode or size
+        assert await tracker.check_hardlink_processed(888, 5000) is False
+        assert await tracker.check_hardlink_processed(999, 4000) is False
 
         # If it's merely PENDING, we haven't successfully processed it yet
         await tracker.update_state(
             file_path="/movies/movie_link2.mkv",
             inode=777,
-            device_id=1,
             mtime=1000.0,
             size=5000,
             status="PENDING",
         )
-        assert await tracker.check_hardlink_processed(777, 1) is False
+        assert await tracker.check_hardlink_processed(777, 5000) is False
 
 
 @pytest.mark.asyncio
@@ -89,13 +87,13 @@ async def test_reset_stale_states(db_path: Path) -> None:
     # First, insert stuck states
     async with StateTracker(db_path) as tracker:
         await tracker.update_state(
-            file_path="/movies/1.mkv", inode=1, device_id=1, mtime=0, size=0, status="EXTRACTING"
+            file_path="/movies/1.mkv", inode=1, mtime=0, size=0, status="EXTRACTING"
         )
         await tracker.update_state(
-            file_path="/movies/2.mkv", inode=2, device_id=1, mtime=0, size=0, status="INFERENCING"
+            file_path="/movies/2.mkv", inode=2, mtime=0, size=0, status="INFERENCING"
         )
         await tracker.update_state(
-            file_path="/movies/3.mkv", inode=3, device_id=1, mtime=0, size=0, status="COMPLETED"
+            file_path="/movies/3.mkv", inode=3, mtime=0, size=0, status="COMPLETED"
         )
 
     # Re-connect to trigger startup logic (reset_stale_states is called in connect)

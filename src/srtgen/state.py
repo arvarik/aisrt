@@ -14,7 +14,6 @@ class FileState:
 
     file_path: str
     inode: int
-    device_id: int
     mtime: float
     size: int
     status: str
@@ -69,12 +68,22 @@ class StateTracker:
         if not self._conn:
             raise RuntimeError("Database connection not established.")
 
+        # Dropping table if it exists with the old schema (device_id)
+        # to ensure clean upgrade for new users.
+        try:
+            async with self._conn.execute("PRAGMA table_info(file_state);") as cursor:
+                columns = await cursor.fetchall()
+                if columns and any(col[1] == "device_id" for col in columns):
+                    logger.info("Upgrading database schema: removing volatile device_id.")
+                    await self._conn.execute("DROP TABLE file_state")
+        except Exception as e:
+            logger.debug(f"Schema upgrade check skipped: {e}")
+
         await self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS file_state (
                 file_path TEXT PRIMARY KEY,
                 inode INTEGER NOT NULL,
-                device_id INTEGER NOT NULL,
                 mtime REAL NOT NULL,
                 size INTEGER NOT NULL,
                 status TEXT NOT NULL,
@@ -83,9 +92,9 @@ class StateTracker:
             )
             """
         )
-        # Index on inode/device_id for quick hardlink deduplication checks
+        # Index on inode/size for quick hardlink deduplication checks
         await self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_file_state_inode_dev ON file_state (inode, device_id)"
+            "CREATE INDEX IF NOT EXISTS idx_file_state_inode_size ON file_state (inode, size)"
         )
         await self._conn.commit()
 
@@ -108,7 +117,7 @@ class StateTracker:
             raise RuntimeError("Database connection not established.")
 
         query = (
-            "SELECT file_path, inode, device_id, mtime, size, status, model_used, timestamp "
+            "SELECT file_path, inode, mtime, size, status, model_used, timestamp "
             "FROM file_state WHERE file_path = ?"
         )
         async with self._conn.execute(query, (file_path,)) as cursor:
@@ -117,12 +126,12 @@ class StateTracker:
                 return FileState(*row)
         return None
 
-    async def check_hardlink_processed(self, inode: int, device_id: int) -> bool:
-        """Check if an identical inode/device pair has already been completed.
+    async def check_hardlink_processed(self, inode: int, size: int) -> bool:
+        """Check if an identical inode/size pair has already been completed.
 
         Args:
             inode: The file's inode.
-            device_id: The filesystem device ID.
+            size: File size in bytes.
 
         Returns:
             True if this exact file data has been successfully processed under any path.
@@ -132,10 +141,10 @@ class StateTracker:
 
         query = (
             "SELECT 1 FROM file_state "
-            "WHERE inode = ? AND device_id = ? "
+            "WHERE inode = ? AND size = ? "
             "AND status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
         )
-        async with self._conn.execute(query, (inode, device_id)) as cursor:
+        async with self._conn.execute(query, (inode, size)) as cursor:
             row = await cursor.fetchone()
             return row is not None
 
@@ -143,7 +152,6 @@ class StateTracker:
         self,
         file_path: str,
         inode: int,
-        device_id: int,
         mtime: float,
         size: int,
         status: str,
@@ -154,7 +162,6 @@ class StateTracker:
         Args:
             file_path: The absolute path of the media file.
             inode: The file's inode.
-            device_id: The filesystem device ID.
             mtime: Last modified time.
             size: File size in bytes.
             status: Processing status (PENDING, EXTRACTING, COMPLETED, etc.).
@@ -165,11 +172,10 @@ class StateTracker:
 
         query = """
             INSERT INTO file_state (
-                file_path, inode, device_id, mtime, size, status, model_used, timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                file_path, inode, mtime, size, status, model_used, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(file_path) DO UPDATE SET
                 inode=excluded.inode,
-                device_id=excluded.device_id,
                 mtime=excluded.mtime,
                 size=excluded.size,
                 status=excluded.status,
@@ -178,7 +184,7 @@ class StateTracker:
         """
         await self._conn.execute(
             query,
-            (file_path, inode, device_id, mtime, size, status, model_used),
+            (file_path, inode, mtime, size, status, model_used),
         )
         await self._conn.commit()
 

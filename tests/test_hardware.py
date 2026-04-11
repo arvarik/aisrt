@@ -45,7 +45,7 @@ def test_hardware_profile_cuda_low_vram() -> None:
     """Test routing with a smaller NVIDIA GPU."""
     profile = HardwareProfile(
         has_cuda=True,
-        vram_gb=3.0,
+        vram_gb=4.0,
         ram_gb=16.0,
         physical_cores=6,
         is_apple_silicon=False,

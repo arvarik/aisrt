@@ -19,7 +19,7 @@ The **Ultimate SRT Generator** is a production-grade daemon built for power user
 *   **Zero-Disk Audio Extraction:** Stops SSD wear-and-tear by bypassing `/tmp/` files completely. Audio streams are asynchronously ripped via FFmpeg and piped directly into RAM (NumPy arrays) for AI ingestion.
 *   **Bounded Asynchronous Concurrency:** Eliminates Python GIL starvation via an `asyncio.TaskGroup` producer-consumer pipeline. It extracts audio streams exactly as fast as the GPU can transcribe them, strictly capping memory usage.
 *   **Intelligent Hardware Routing Matrix:** Auto-detects NVIDIA GPUs (VRAM), Apple Silicon, or pure CPU environments to intelligently route to the most optimal `large-v3-turbo`, `small`, or quantized `int8` model.
-*   **NAS-Safe & Deduplicating:** Backed by an asynchronous local SQLite database (WAL mode) tracking `inode` and `device_id`. It avoids parsing active downloads, seamlessly skips duplicate hardlinks, and performs strict POSIX Atomic `os.replace` operations with original MKV metadata inheritance.
+*   **NAS-Safe & Deduplicating:** Backed by an asynchronous local SQLite database (WAL mode) tracking `inode` and `size`. It avoids parsing active downloads, seamlessly skips duplicate hardlinks, and performs strict POSIX Atomic `os.replace` operations with original MKV metadata inheritance.
 *   **Broadcast Formatting:** Implements a strict chunking algorithm on top of Whisper's word-level timestamps. No more "walls of text"—subtitles are limited to ~42 chars and 2 lines, naturally breaking on terminal punctuation.
 
 ---

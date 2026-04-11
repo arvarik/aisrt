@@ -17,11 +17,13 @@ def mock_discovery() -> DiscoveryEngine:
     """Provide a DiscoveryEngine that yields mock files."""
     engine = AsyncMock(spec=DiscoveryEngine)
     engine.config = FilterConfig(target_languages=["eng"])
+    engine.state_tracker = AsyncMock()
+    engine.state_tracker.update_state = AsyncMock()
 
     async def mock_scan() -> AsyncGenerator[tuple[MediaFile, str], None]:
-        yield MediaFile(Path("movie1.mkv"), 100, 1.0, 1, 1), "PROCESS"
-        yield MediaFile(Path("movie2.mkv"), 100, 1.0, 2, 1), "PROCESS"
-        yield MediaFile(Path("movie3.mkv"), 100, 1.0, 3, 1), "SKIP"
+        yield MediaFile(Path("movie1.mkv"), 100, 1.0, 1), "PROCESS"
+        yield MediaFile(Path("movie2.mkv"), 100, 1.0, 2), "PROCESS"
+        yield MediaFile(Path("movie3.mkv"), 100, 1.0, 3), "SKIP"
 
     engine.scan = mock_scan
     return engine

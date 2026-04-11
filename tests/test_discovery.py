@@ -94,7 +94,6 @@ async def test_scan_database_state(temp_media_dir: Path, filter_config: FilterCo
     completed_state = FileState(
         file_path=str(temp_media_dir / "valid_movie.mkv"),
         inode=1,
-        device_id=1,
         mtime=1.0,
         size=5,  # size of "dummy"
         status="COMPLETED",

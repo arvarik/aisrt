@@ -22,7 +22,6 @@ class MediaFile:
     size: int
     mtime: float
     inode: int
-    device_id: int
 
 
 class DiscoveryEngine:
@@ -81,7 +80,6 @@ class DiscoveryEngine:
                     size=stat.st_size,
                     mtime=stat.st_mtime,
                     inode=stat.st_ino,
-                    device_id=stat.st_dev,
                 )
             except OSError as e:
                 logger.warning(f"Could not stat {file_path}: {e}")
@@ -105,7 +103,7 @@ class DiscoveryEngine:
             return "SKIP: Already processed (Database)"
 
         is_hardlink = await self.state_tracker.check_hardlink_processed(
-            media_file.inode, media_file.device_id
+            media_file.inode, media_file.size
         )
         if is_hardlink:
             return "SKIP: Hardlink to already processed file"
@@ -118,7 +116,6 @@ class DiscoveryEngine:
             await self.state_tracker.update_state(
                 file_path=str(media_file.path),
                 inode=media_file.inode,
-                device_id=media_file.device_id,
                 mtime=media_file.mtime,
                 size=media_file.size,
                 status="EMBEDDED_EXISTS",

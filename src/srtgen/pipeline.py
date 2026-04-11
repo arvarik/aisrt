@@ -95,6 +95,14 @@ class Pipeline:
                 break
 
             try:
+                await self.discovery.state_tracker.update_state(
+                    file_path=str(media_file.path),
+                    inode=media_file.inode,
+                    mtime=media_file.mtime,
+                    size=media_file.size,
+                    status="EXTRACTING",
+                )
+
                 track_idx = await AudioExtractor.get_audio_track_index(
                     media_file.path, self.target_languages
                 )
@@ -130,6 +138,13 @@ class Pipeline:
                 break
 
             try:
+                await self.discovery.state_tracker.update_state(
+                    file_path=str(job.media_file.path),
+                    inode=job.media_file.inode,
+                    mtime=job.media_file.mtime,
+                    size=job.media_file.size,
+                    status="INFERENCING",
+                )
                 logger.info(f"GPU processing: {job.media_file.path.name}...")
 
                 # Execute inference in the dedicated STT thread pool
@@ -178,7 +193,6 @@ class Pipeline:
                     await self.discovery.state_tracker.update_state(
                         file_path=str(job.media_file.path),
                         inode=job.media_file.inode,
-                        device_id=job.media_file.device_id,
                         mtime=job.media_file.mtime,
                         size=job.media_file.size,
                         status="COMPLETED",
