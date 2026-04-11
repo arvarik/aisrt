@@ -98,7 +98,7 @@ aisrt run /mnt/anime --translate
 * **What it does:** Same as the standard run, but it passes `task="translate"` into Whisper. The AI will ingest the foreign audio and natively dub it into perfect English `.srt` files!
 
 #### 4. The 24/7 NAS Watchdog Daemon
-You want `aisrt` to run in the background on your server and automatically process new movies as soon as Radarr downloads them.
+You want `aisrt` to run in the background on your server and automatically process new movies as soon as they are added to your library.
 ```bash
 aisrt run /mnt/media --watch --watch-interval 30
 ```
@@ -116,7 +116,7 @@ If you are deploying via Docker Compose, you can configure these exact same beha
 *   `AISRT_TRANSLATE=True` (Auto-dub foreign audio into English)
 *   `AISRT_WATCH=True` (Run 24/7 as a daemon)
 *   `AISRT_WATCH_INTERVAL_MINS=60` (Time between library scans)
-*   `AISRT_FILTERS__MIN_AGE_MINS=30` (Skip active torrent/usenet downloads)
+*   `AISRT_FILTERS__MIN_AGE_MINS=30` (Skip files currently being downloaded)
 *   `AISRT_HARDWARE__FORCE_MODEL=large-v3-turbo`
 
 ---

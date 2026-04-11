@@ -38,7 +38,7 @@ The `ProfileEngine` initializes safely on startup to map the compute fabric:
 ### 3.3. NAS-Safe Discovery & Deduplication
 *   **Active File Protection:** Skip if `st_mtime` is within the last 15 minutes (avoids parsing actively downloading/remuxing MKVs).
 *   **Embedded Stream Detection:** Execute `ffprobe -v error -select_streams s -show_entries stream=index:stream_tags=language -of json`. If an English subtitle stream exists, mark DB `STATUS=EMBEDDED_EXISTS` and skip.
-*   **Inode Deduplication:** Track `st_ino` to avoid parsing hardlinks created by tools like Radarr/Sonarr multiple times.
+*   **Inode Deduplication:** Track `st_ino` to avoid parsing hardlinks multiple times if media is mapped to multiple directories.
 
 ### 3.4. Zero-Disk Audio Extraction Pipeline
 Extracting audio into a memory pipe eliminates SSD wear and reduces I/O latency.
