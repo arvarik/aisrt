@@ -32,8 +32,8 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/arvarik/srt-generator.git
-    cd srt-generator
+    git clone https://github.com/arvarik/aisrt.git
+    cd aisrt
     ```
 2.  Review and modify the `docker-compose.yml` to point to your media directory:
     ```yaml
@@ -52,8 +52,8 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/arvarik/srt-generator.git
-cd srt-generator
+git clone https://github.com/arvarik/aisrt.git
+cd aisrt
 
 # 2. Create virtual environment
 python3 -m venv .venv

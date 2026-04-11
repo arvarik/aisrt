@@ -9,8 +9,8 @@ This project uses modern Python tooling. To get started:
 1. Ensure you have Python 3.11+ installed.
 2. Clone the repository:
    ```bash
-   git clone https://github.com/arvarik/srt-generator.git
-   cd srt-generator
+   git clone https://github.com/arvarik/aisrt.git
+   cd aisrt
    ```
 3. Set up a virtual environment and install development dependencies:
    ```bash
