@@ -72,30 +72,47 @@ pip install -e ".[dev]"
 
 The application features a beautifully formatted CLI built on `Typer` and `Rich`.
 
-### Dry-Run (Scan)
-Safely scan a directory to see exactly what hardware will be loaded and what files will be processed, without actually running the AI model.
+### 5 Robust Usage Examples
 
+Here are five powerful ways to utilize `aisrt` in your homelab or production environment:
+
+#### 1. The Safe Dry-Run (Check What Will Happen)
+If you just pointed the tool at a massive 10TB media library and want to ensure it skips the right files without actually running the GPU inference:
 ```bash
-aisrt scan /path/to/movies --min-age-mins 60 --verbose
+aisrt scan /mnt/movies --min-age-mins 60
 ```
+* **What it does:** Scans the library, skips files downloaded in the last 60 minutes, ignores videos that already have a `.srt` or an embedded English text track, and prints a beautiful table showing exactly which files will be processed.
 
-### Live Run
-Execute the extraction and inference pipeline.
-
+#### 2. Standard Mass Generation
+The standard run command. Perfect for a weekly cronjob.
 ```bash
-aisrt run /path/to/movies
+aisrt run /mnt/movies
 ```
+* **What it does:** Runs the full pipeline. Extracts audio to RAM, automatically profiles your hardware, boots the optimal Whisper model (e.g., `large-v3-turbo`), generates broadcast-standard atomic `.srt` files, and saves progress to the SQLite database.
 
-### CLI Overrides & Environment Variables
-You can manually override the hardware auto-detector and execution options.
-
-**Via CLI:**
+#### 3. Foreign Cinema AI Translation (Dub to English)
+You have a folder full of Anime or French cinema and want English subtitles generated.
 ```bash
-aisrt run /path/to/movies --force-device cuda --force-model large-v3-turbo --translate --watch --watch-interval 60
+aisrt run /mnt/anime --translate
 ```
+* **What it does:** Same as the standard run, but it passes `task="translate"` into Whisper. The AI will ingest the foreign audio and natively dub it into perfect English `.srt` files!
 
-**Via Docker Environment Variables:**
-Since `AppConfig` utilizes `pydantic-settings`, you can configure the daemon entirely through your `docker-compose.yml`:
+#### 4. The 24/7 NAS Watchdog Daemon
+You want `aisrt` to run in the background on your server and automatically process new movies as soon as Radarr downloads them.
+```bash
+aisrt run /mnt/media --watch --watch-interval 30
+```
+* **What it does:** Turns the CLI into a long-running daemon. It will scan the directory, process any missing subtitles, and then gracefully sleep for 30 minutes before waking up to check for new files again.
+
+#### 5. Hardcoding Low-End Hardware
+You are running this on a potato CPU or a server with a very weak GPU, and you want to ensure it doesn't try to load a heavy model, or you want to force CPU execution.
+```bash
+aisrt run /mnt/media --force-device cpu --force-model small.en
+```
+* **What it does:** Bypasses the auto-profiler and explicitly locks the execution to your CPU using the lightweight `small.en` quantized model.
+
+### Docker Environment Variables
+If you are deploying via Docker Compose, you can configure these exact same behaviors using `pydantic-settings` environment variables instead of CLI flags:
 *   `AISRT_TRANSLATE=True` (Auto-dub foreign audio into English)
 *   `AISRT_WATCH=True` (Run 24/7 as a daemon)
 *   `AISRT_WATCH_INTERVAL_MINS=60` (Time between library scans)
