@@ -43,7 +43,7 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
     ```
 3.  Deploy:
     ```bash
-    docker compose up --build -d
+    docker compose up -d
     ```
 
 ### 💻 Native Python (Ubuntu Desktop / Server / macOS)

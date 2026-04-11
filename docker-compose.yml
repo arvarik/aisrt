@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   aisrt:
-    build: .
+    image: ghcr.io/arvarik/srt-generator:latest
     container_name: aisrt
     # CRITICAL: Prevents CTranslate2 shared-memory core dumps when processing large files.
     shm_size: '4gb'
