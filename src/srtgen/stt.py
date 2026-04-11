@@ -44,14 +44,27 @@ class STTWorker:
             f"on {config.device} ({config.compute_type})..."
         )
 
-        def _load_model() -> WhisperModel:
-            return WhisperModel(
+        def _load_model() -> WhisperModel | Any:
+            model = WhisperModel(
                 model_size_or_path=config.model_name,
                 device=config.device,
                 compute_type=config.compute_type,
                 cpu_threads=config.cpu_threads,
                 num_workers=1,  # Keep inner workers to 1 since we'll process sequentially
             )
+
+            if config.device == "cuda":
+                try:
+                    from faster_whisper import BatchedInferencePipeline
+
+                    logger.info("CUDA detected. Loading BatchedInferencePipeline...")
+                    return BatchedInferencePipeline(model=model)
+                except ImportError:
+                    logger.warning(
+                        "BatchedInferencePipeline not found. Ensure faster_whisper >= 1.0."
+                    )
+
+            return model
 
         # Initialize asynchronously using the dedicated executor to not block main thread
         future = self.executor.submit(_load_model)

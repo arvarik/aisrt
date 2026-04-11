@@ -115,23 +115,42 @@ class AudioExtractor:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=1024 * 1024 * 500,
+            # No limit imposed; we chunk the stream
         )
 
+        audio_bytes = bytearray()
+        stderr_bytes = bytearray()
+
+        async def _read_stdout() -> None:
+            if not process.stdout:
+                return
+            while chunk := await process.stdout.read(65536):
+                audio_bytes.extend(chunk)
+
+        async def _read_stderr() -> None:
+            if not process.stderr:
+                return
+            while chunk := await process.stderr.read(65536):
+                stderr_bytes.extend(chunk)
+
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            # Concurrently read both streams to prevent pipeline blocking
+            await asyncio.wait_for(
+                asyncio.gather(_read_stdout(), _read_stderr(), process.wait()), timeout=timeout
+            )
         except TimeoutError as err:
             process.kill()
             raise RuntimeError(
                 f"FFmpeg extraction timed out after {timeout}s for {video_path}"
             ) from err
+
         if process.returncode != 0:
-            error_msg = stderr.decode().strip()
+            error_msg = stderr_bytes.decode().strip()
             raise RuntimeError(f"FFmpeg extraction failed for {video_path}: {error_msg}")
 
-        if not stdout:
+        if not audio_bytes:
             raise RuntimeError(f"FFmpeg extraction resulted in empty output for {video_path}")
 
         # Convert raw 16-bit PCM bytes to 32-bit float normalized between -1.0 and 1.0
-        audio_np = np.frombuffer(stdout, np.int16).astype(np.float32) / 32768.0
+        audio_np = np.frombuffer(audio_bytes, np.int16).astype(np.float32) / 32768.0
         return audio_np

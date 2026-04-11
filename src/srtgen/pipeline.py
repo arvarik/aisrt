@@ -31,8 +31,12 @@ class Pipeline:
         self.discovery = discovery_engine
         self.target_languages = discovery_engine.config.target_languages
 
-        # Bounded queues prevent Out-Of-Memory errors
-        self.extraction_queue: asyncio.Queue[MediaFile | None] = asyncio.Queue(maxsize=cpu_cores)
+        # Bounded queues prevent Out-Of-Memory errors and NAS I/O thrashing
+        # GPU inference is the true bottleneck, so extraction only needs a tiny buffer
+        max_extractors = min(cpu_cores, 3)
+        self.extraction_queue: asyncio.Queue[MediaFile | None] = asyncio.Queue(
+            maxsize=max_extractors
+        )
         self.inference_queue: asyncio.Queue[InferenceJob | None] = asyncio.Queue(maxsize=2)
 
         self.cpu_cores = cpu_cores
@@ -129,16 +133,22 @@ class Pipeline:
                     if not stt_worker.model:
                         raise RuntimeError("Whisper model is not initialized.")
 
+                    transcribe_kwargs = {
+                        "beam_size": 5,
+                        "vad_filter": True,
+                        "vad_parameters": {"min_silence_duration_ms": 500},
+                        "condition_on_previous_text": False,
+                        "compression_ratio_threshold": 2.4,
+                        "no_speech_threshold": 0.6,
+                        "word_timestamps": True,
+                        "initial_prompt": "A well-punctuated English subtitle.",
+                    }
+
+                    if stt_worker.model.__class__.__name__ == "BatchedInferencePipeline":
+                        transcribe_kwargs["batch_size"] = 16
+
                     segments, _ = stt_worker.model.transcribe(
-                        current_job.audio_data,
-                        beam_size=5,
-                        vad_filter=True,
-                        vad_parameters={"min_silence_duration_ms": 500},
-                        condition_on_previous_text=False,
-                        compression_ratio_threshold=2.4,
-                        no_speech_threshold=0.6,
-                        word_timestamps=True,
-                        initial_prompt="A well-punctuated English subtitle.",
+                        current_job.audio_data, **transcribe_kwargs
                     )
                     return formatter.format_segments(segments)
 
@@ -153,9 +163,13 @@ class Pipeline:
                         self.target_languages[0] if self.target_languages else "en",
                     )
                     # Update SQLite state to COMPLETED
-                    model_str = (
-                        stt_worker.model.model_size_or_path if stt_worker.model else "unknown"
-                    )
+                    if stt_worker.model is None:
+                        model_str = "unknown"
+                    elif stt_worker.model.__class__.__name__ == "BatchedInferencePipeline":
+                        base_model = getattr(stt_worker.model, "model", stt_worker.model)
+                        model_str = getattr(base_model, "model_size_or_path", "unknown")
+                    else:
+                        model_str = getattr(stt_worker.model, "model_size_or_path", "unknown")
                     await self.discovery.state_tracker.update_state(
                         file_path=str(job.media_file.path),
                         inode=job.media_file.inode,

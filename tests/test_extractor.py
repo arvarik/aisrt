@@ -64,7 +64,11 @@ async def test_extract_audio_to_memory() -> None:
 
     with patch("asyncio.create_subprocess_exec") as mock_exec:
         process_mock = AsyncMock()
-        process_mock.communicate.return_value = (fake_pcm_data, b"")
+        
+        # Mock stdout.read() to return data once, then empty bytes to signify EOF
+        process_mock.stdout.read.side_effect = [fake_pcm_data, b""]
+        process_mock.stderr.read.side_effect = [b""]
+        
         process_mock.returncode = 0
         mock_exec.return_value = process_mock
 
