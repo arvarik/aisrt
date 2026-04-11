@@ -32,7 +32,7 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/username/srt-generator.git
+    git clone https://github.com/arvarik/srt-generator.git
     cd srt-generator
     ```
 2.  Review and modify the `docker-compose.yml` to point to your media directory:
@@ -52,7 +52,7 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/username/srt-generator.git
+git clone https://github.com/arvarik/srt-generator.git
 cd srt-generator
 
 # 2. Create virtual environment
@@ -86,11 +86,21 @@ Execute the extraction and inference pipeline.
 srtgen run /path/to/movies
 ```
 
-### CLI Overrides
-You can manually override the hardware auto-detector:
+### CLI Overrides & Environment Variables
+You can manually override the hardware auto-detector and execution options.
+
+**Via CLI:**
 ```bash
-srtgen run /path/to/movies --force-device cuda --force-model large-v3-turbo --force-compute-type int8_float16
+srtgen run /path/to/movies --force-device cuda --force-model large-v3-turbo --translate --watch --watch-interval 60
 ```
+
+**Via Docker Environment Variables:**
+Since `AppConfig` utilizes `pydantic-settings`, you can configure the daemon entirely through your `docker-compose.yml`:
+*   `SRTGEN_TRANSLATE=True` (Auto-dub foreign audio into English)
+*   `SRTGEN_WATCH=True` (Run 24/7 as a daemon)
+*   `SRTGEN_WATCH_INTERVAL_MINS=60` (Time between library scans)
+*   `SRTGEN_FILTERS__MIN_AGE_MINS=30` (Skip active torrent/usenet downloads)
+*   `SRTGEN_HARDWARE__FORCE_MODEL=large-v3-turbo`
 
 ---
 
