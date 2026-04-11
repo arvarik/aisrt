@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 name = "aisrt"
 version = "1.0.1"
 description = "Hardware-aware, concurrent pipeline for subtitle generation."
-authors = ["Arvind <arvind@example.com>"]
+authors = ["Arvind <arvind.arik@gmail.com>"]
 readme = "README.md"
 packages = [{include = "aisrt", from = "src"}]
 
