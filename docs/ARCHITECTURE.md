@@ -1,4 +1,4 @@
-# Ultimate SRT Generator: Architecture & Implementation Strategy v2.0
+# Ultimate AI-SRT Generator: Architecture & Implementation Strategy v2.0
 **Status:** Approved for Production Implementation (Sr. Principal Engineer Edition)
 
 ## 1. Overview & Objectives
