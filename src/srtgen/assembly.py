@@ -85,6 +85,15 @@ class SRTFormatter:
             if not word:
                 continue
 
+            # Temporal gap check: flush if silence > 1.5s
+            if current_end > 0.0 and (word_obj.start - current_end) > 1.5:
+                if current_words and current_start is not None:
+                    self._flush_words(current_words, current_start, current_end)
+                    current_words = []
+                    current_start = None
+                    char_count = 0
+                    line_count = 1
+
             if current_start is None:
                 current_start = word_obj.start
 
@@ -99,7 +108,7 @@ class SRTFormatter:
                 # Insert newline before the current word
                 current_words.pop()  # Remove the word we just added
                 current_words.append("\n")
-                current_words.append(word_obj.word)
+                current_words.append(word_obj.word.lstrip())
                 char_count = len(word)
                 line_count += 1
 

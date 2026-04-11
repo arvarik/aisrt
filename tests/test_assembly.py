@@ -64,7 +64,7 @@ def test_srt_formatter_word_chunking() -> None:
         MockWord("is ", 0.5, 1.0),
         MockWord("a ", 1.0, 1.5),
         MockWord("long ", 1.5, 2.0),
-        MockWord("sentence ", 2.0, 2.5),
+        MockWord(" sentence ", 2.0, 2.5),  # Testing leading space wrap
         MockWord("indeed.", 2.5, 3.0),
     ]
 
@@ -74,6 +74,28 @@ def test_srt_formatter_word_chunking() -> None:
 
     expected_block = "1\n00:00:00,000 --> 00:00:03,000\nThis is a long \nsentence indeed.\n"
     assert expected_block in srt_content
+
+
+def test_srt_formatter_temporal_gap() -> None:
+    """Test that a temporal gap > 1.5s forces a subtitle flush."""
+    formatter = SRTFormatter(max_chars_per_line=40, max_lines=2)
+
+    words = [
+        MockWord("Hello ", 0.0, 1.0),
+        MockWord("world, ", 1.0, 2.0),
+        # 3.0 second gap here
+        MockWord("are ", 5.0, 5.5),
+        MockWord("you ", 5.5, 6.0),
+        MockWord("there?", 6.0, 6.5),
+    ]
+
+    segments = [MockSegment("Hello world, are you there?", 0.0, 6.5, words=words)]
+
+    srt_content = formatter.format_segments(segments)
+
+    # Should be split into two blocks due to the gap
+    assert "1\n00:00:00,000 --> 00:00:02,000\nHello world," in srt_content
+    assert "2\n00:00:05,000 --> 00:00:06,500\nare you there?" in srt_content
 
 
 def test_atomic_writer_success(tmp_path: Path) -> None:
