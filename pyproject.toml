@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "aisrt"
-version = "1.0.2"
+version = "1.1.0"
 description = "Hardware-aware, concurrent pipeline for subtitle generation."
 authors = ["Arvind <arvind.arik@gmail.com>"]
 readme = "README.md"
@@ -15,7 +15,7 @@ aisrt = "aisrt.cli:app"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-typer = {extras = ["all"], version = "^0.9.0"}
+typer = {extras = ["all"], version = "^0.12.0"}
 rich = "^13.7.0"
 loguru = "^0.7.2"
 pydantic = "^2.5.3"

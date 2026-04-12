@@ -1,5 +1,6 @@
 """Speech-to-Text inference wrapper and thread management."""
 
+import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -38,6 +39,15 @@ class STTWorker:
         """
         if self.model is not None:
             return
+
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token:
+            logger.info("Authenticating with HuggingFace Hub to bypass rate limits...")
+            try:
+                from huggingface_hub import login
+                login(token=hf_token)
+            except Exception as e:
+                logger.warning(f"HuggingFace login failed: {e}")
 
         logger.info(
             f"Initializing WhisperModel '{config.model_name}' "

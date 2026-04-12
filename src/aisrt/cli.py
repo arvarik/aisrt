@@ -150,7 +150,24 @@ def run(
                 pipeline = Pipeline(
                     engine, cpu_cores=profile.physical_cores, translate=config.translate
                 )
-                await pipeline.run()
+                stats = await pipeline.run()
+                
+                from rich.panel import Panel
+                
+                elapsed = stats.end_time - stats.start_time
+                audio_hours = stats.total_audio_duration_secs / 3600
+                speed = (stats.total_audio_duration_secs / elapsed) if elapsed > 0 else 0
+                
+                stats_msg = (
+                    f"Files Scanned: [cyan]{stats.files_scanned}[/cyan] | "
+                    f"Processed: [green]{stats.files_processed}[/green] | "
+                    f"Skipped: [yellow]{stats.files_skipped}[/yellow] | "
+                    f"Failed: [red]{stats.files_failed}[/red]\n"
+                    f"Total Audio Transcribed: [bold]{audio_hours:.2f} hours[/bold]\n"
+                    f"Pipeline Execution Time: [bold]{elapsed:.2f} seconds[/bold] "
+                    f"(Speedup: [bold green]{speed:.2f}x[/bold green])"
+                )
+                console.print(Panel(stats_msg, title="[bold]Run Summary[/bold]", expand=False))
 
                 if not config.watch:
                     break

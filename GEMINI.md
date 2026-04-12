@@ -7,7 +7,7 @@ Your code must be **Open Source Enterprise Grade**.
 ## 🛑 STRICT ARCHITECTURAL BOUNDARIES (NEVER VIOLATE)
 
 1. **Zero-Disk Extraction (No SSD Wear):**
-   - NEVER write `.wav` or `.mp4` temp files to disk.
+   - NEVER write `.wav`, `.mp4`, or `.ts` temp files to disk.
    - ALWAYS stream `ffmpeg` via `stdout` (`-f s16le -`) dynamically into a `bytearray` and convert to `numpy.ndarray`.
    - If you modify `AudioExtractor`, ensure memory streams are not blocked by arbitrary `.communicate()` limits.
 
@@ -15,6 +15,7 @@ Your code must be **Open Source Enterprise Grade**.
    - NEVER uncap the `asyncio.Queue` bounds.
    - Extraction queue `maxsize` is strictly capped at `3` to prevent the CPU from flooding RAM with idle audio buffers while waiting for the GPU.
    - Inference queue `maxsize` is strictly capped at `2`.
+   - ALWAYS explicitly delete `job.audio_data` and invoke `gc.collect()` after inference to prevent memory fragmentation during 24/7 watch loops.
 
 3. **Event Loop Starvation (GIL Deadlocks):**
    - NEVER execute `faster-whisper` inference or blocking CTranslate2 operations inside the main `asyncio` event loop.
