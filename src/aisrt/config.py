@@ -31,7 +31,7 @@ class FilterConfig(BaseModel):
         description="Minimum file age in minutes to avoid processing active downloads.",
     )
     extensions: list[str] = Field(
-        default_factory=lambda: [".mkv", ".mp4", ".avi", ".webm"],
+        default_factory=lambda: [".mkv", ".mp4", ".avi", ".webm", ".ts", ".m2ts", ".vob"],
         description="List of valid media file extensions to process.",
     )
     exclude_patterns: list[str] = Field(

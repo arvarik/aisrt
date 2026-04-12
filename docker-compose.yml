@@ -10,6 +10,7 @@ services:
       # Expose all GPUs to the container.
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_TOKEN=${HF_TOKEN:-}
       # (Optional) You can override the hardware detector by forcing variables here:
       # - FORCE_DEVICE=cuda
       # - FORCE_COMPUTE_TYPE=float16

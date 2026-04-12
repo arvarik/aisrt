@@ -1,6 +1,7 @@
 """Asynchronous TaskGroup pipeline for Producer-Consumer workflow."""
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,6 +9,18 @@ from loguru import logger
 
 from aisrt.discovery import DiscoveryEngine, MediaFile
 from aisrt.extractor import AudioExtractor
+
+
+@dataclass
+class PipelineStats:
+    """Statistics for a single pipeline run."""
+    files_scanned: int = 0
+    files_skipped: int = 0
+    files_processed: int = 0
+    files_failed: int = 0
+    start_time: float = 0.0
+    end_time: float = 0.0
+    total_audio_duration_secs: float = 0.0
 
 
 @dataclass
@@ -44,13 +57,19 @@ class Pipeline:
         self.inference_queue: asyncio.Queue[InferenceJob | None] = asyncio.Queue(maxsize=2)
 
         self.cpu_cores = cpu_cores
+        self.stats = PipelineStats()
 
-    async def run(self) -> None:
+    async def run(self) -> PipelineStats:
         """Start the entire pipeline and wait for completion."""
         logger.info("Initializing async TaskGroup pipeline...")
+        self.stats.start_time = time.time()
+        
         async with asyncio.TaskGroup() as tg:
             # We use a supervisor task to manage the graceful teardown of workers
             tg.create_task(self._orchestrator(tg))
+
+        self.stats.end_time = time.time()
+        return self.stats
 
     async def _orchestrator(self, tg: asyncio.TaskGroup) -> None:
         """Supervises the tasks and issues sentinels for graceful shutdown."""
@@ -77,8 +96,11 @@ class Pipeline:
         """Crawls the filesystem and pushes files to the extraction queue."""
         logger.debug("Producer (Scanner) started.")
         async for media_file, action in self.discovery.scan():
+            self.stats.files_scanned += 1
             if action == "PROCESS":
                 await self.extraction_queue.put(media_file)
+            else:
+                self.stats.files_skipped += 1
 
         # Broadcast termination sentinels to all extractors
         logger.debug("Producer finished. Sending shutdown sentinels to extractors.")
@@ -167,10 +189,34 @@ class Pipeline:
                     if stt_worker.model.__class__.__name__ == "BatchedInferencePipeline":
                         transcribe_kwargs["batch_size"] = 16
 
-                    segments, _ = stt_worker.model.transcribe(
+                    segments, info = stt_worker.model.transcribe(
                         current_job.audio_data, **transcribe_kwargs
                     )
-                    return formatter.format_segments(segments)
+                    self.stats.total_audio_duration_secs += info.duration
+
+                    from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, BarColumn, TextColumn
+                    from aisrt.cli import console
+
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                        TimeElapsedColumn(),
+                        console=console,
+                        transient=True,
+                    ) as progress:
+                        task = progress.add_task(
+                            f"Transcribing {current_job.media_file.path.name}...", 
+                            total=info.duration
+                        )
+
+                        def _segment_generator():
+                            for segment in segments:
+                                progress.update(task, completed=segment.end)
+                                yield segment
+                        
+                        return formatter.format_segments(_segment_generator())
 
                 srt_content = await loop.run_in_executor(stt_worker.executor, _run_inference, job)
 
@@ -198,12 +244,20 @@ class Pipeline:
                         status="COMPLETED",
                         model_used=model_str,
                     )
+                    self.stats.files_processed += 1
                 else:
                     logger.warning(f"No speech detected in {job.media_file.path.name}")
+                    self.stats.files_failed += 1
 
             except Exception as e:
                 logger.error(f"Inference failed on {job.media_file.path.name}: {e}")
+                self.stats.files_failed += 1
             finally:
                 self.inference_queue.task_done()
+                
+                # Clean up memory explicitly
+                del job.audio_data
+                import gc
+                gc.collect()
 
         logger.debug("Inference worker cleanly shut down.")

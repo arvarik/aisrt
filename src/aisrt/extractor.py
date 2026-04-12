@@ -140,6 +140,7 @@ class AudioExtractor:
             )
         except TimeoutError as err:
             process.kill()
+            await process.communicate()
             raise RuntimeError(
                 f"FFmpeg extraction timed out after {timeout}s for {video_path}"
             ) from err
