@@ -3,14 +3,17 @@
 _This document enforces the visual identity and coding patterns of the project. It prevents context drift as multiple agents work on the codebase. Agents MUST follow these rules strictly._
 
 ## 1. Visual Language & Tokens
-N/A — CLI / backend-only project. Output formatting is handled via `Rich` dynamically for terminal progress bars and tables.
+- **Terminal UI (`Rich`)**: Output formatting is handled exclusively via `Rich`. NEVER use standard `print()`.
+- **Progress Bars**: Use `rich.progress` to represent FFmpeg extraction metrics and CTranslate inference batch progress. Ensure bars gracefully decay if `stdout` is piped to a file.
+- **Logging**: Use `rich.console.Console` for stylized state logs (e.g., `[green]Extracting...[/green]`).
 
-## 2. Component Patterns
-N/A
+## 2. CLI Component Patterns
+- **Typer Arguments**: CLI arguments (`aisrt run`) MUST be defined via `typer.Option`. Use exact `kebab-case` for flags (e.g. `--min-age-mins`).
+- **Pydantic Validation**: All environment variables and configurations (`config.py`) must be strictly parsed via `pydantic-settings`. Do not use raw `os.environ.get()` inside business logic.
 
 ## 3. Code Conventions
 ### Architecture Patterns
-- **Concurrency**: `asyncio.TaskGroup` orchestrator handles concurrent pipelines. Blocking workloads (like `faster-whisper` inference) MUST be offloaded to `loop.run_in_executor()`.
+- **Concurrency**: `asyncio.TaskGroup` orchestrator handles concurrent pipelines. Blocking workloads (like `faster-whisper` inference or heavy numpy transpositions) MUST be offloaded to `loop.run_in_executor()`.
 - **No Temporary Files**: Zero-disk extraction via FFmpeg streaming `stdout` directly to `bytearray` and `numpy.ndarray`. 
 
 ### State Management
