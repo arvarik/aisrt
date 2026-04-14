@@ -11,7 +11,7 @@ This is for NAS hoarders and sysadmins who manage petabyte-scale media libraries
 ## 3. Core Beliefs
 - **Zero-Disk SSD Preservation**: Extracting terabytes of audio should not wear down SSD lifespans. We stream everything to memory.
 - **Hardware Awareness**: Maximize hardware utilization natively without configuration tweaking. Route automatically to the best Whisper model that fits in VRAM/RAM.
-- **Resilience**: The daemon must run indefinitely without GIL deadlocks, OOM errors, or database corruption from network dropouts.
+- **Operational Resiliency (Silent Recovery)**: The daemon must run indefinitely without GIL deadlocks, OOM errors, or database corruption from network dropouts. If a single corrupted MKV file causes FFmpeg or CTranslate to crash, the pipeline must log the error, abruptly dump that specific extraction queue, and seamlessly proceed to the next file without killing the daemon. It is a strictly "set-and-forget" background process.
 
 ## 4. Design & UX Principles
 - **Beautiful Terminal Output**: Rich, informative progress bars and dashboard summaries.

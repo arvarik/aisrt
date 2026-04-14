@@ -12,9 +12,11 @@ _This document acts as the definitive anchor for understanding system design, da
 - **Machine Learning**: `faster-whisper` (CTranslate2 backend) auto-routed based on hardware profiles (CUDA, Apple Silicon, CPU).
 
 ## 2. System Boundaries & Data Flow
-### Request / Data Flow
-- **Pipeline**: CLI entrypoint → `asyncio.TaskGroup` producer-consumer orchestrator → bounded `asyncio.Queue` → GPU inference worker in `ThreadPoolExecutor(max_workers=1)` → atomic POSIX file writer.
-- **Audio Extraction**: `ffmpeg` streaming via `stdout` (`-f s16le -`) dynamically into a `bytearray` and converted to `numpy.ndarray`. 
+### Pipeline Lifecyle Flow
+1. **Discovery (`discovery.py`)**: Crawls NAS mounts safely, evaluating `inode` state, sibling SRT presence, and internal embedded subtitle tracks via `ffprobe` before queueing.
+2. **Extraction (`extractor.py`)**: Spawns `ffmpeg` subprocess. Streams `-f s16le -` via `stdout` into an unbounded dynamically growing `bytearray` (zero-disk), finally converting to a monolithic `numpy.ndarray`.
+3. **Inference (`stt.py`)**: Wraps `faster-whisper.BatchedInferencePipeline`. Submits the `numpy.ndarray` via a `ThreadPoolExecutor` to bypass GIL and prevent asyncio event loop starvation.
+4. **Assembly (`assembly.py`)**: Parses the raw segment timestamps, applies punctuation/chunking heuristics for broadcast readability, and commits to NAS using `os.replace()` for POSIX atomic safety.
 
 ### Concurrency / Threading Model
 - Strictly bounded `asyncio.Queue` bounds: extraction queue `maxsize=3`, inference queue `maxsize=2`. This prevents the CPU from flooding RAM with idle audio buffers while waiting for the GPU.
@@ -29,9 +31,13 @@ _This document acts as the definitive anchor for understanding system design, da
 - CLI tool interface defined in `src/aisrt/cli.py` using Typer.
 - Commands: `run` (process media) and `scan` (dry-run profiling).
 
-## 5. External Integrations / AI
-- Integrates `faster-whisper` with intelligent hardware routing (auto-detects VRAM and routes to `large-v3`, `large-v3-turbo`, `small`, or `int8` models).
-- Shells out to `ffmpeg`/`ffprobe` for media analysis and zero-disk streaming.
+## 5. External Integrations / Hardware Acceleration
+- **Intelligent Routing (`hardware.py`)**: Auto-detects system specs. 
+  - VRAM >= 12GB: Routes to `large-v3` with `float16`.
+  - VRAM >= 8GB: Routes to `large-v3-turbo`.
+  - Edge cases fallback to `int8` quantization or pure CPU execution.
+  - Apple Silicon routes directly to Metal Performance Shaders (MPS).
+- **Media Processing**: Shells out to `ffmpeg`/`ffprobe` subprocesses. Avoids python AV bindings to minimize memory leaks and maximize codec compatibility.
 
 ## 6. Invariants & Safety Rules
 - **Zero-Disk Extraction**: NEVER write `.wav`, `.mp4`, or `.ts` temp files to disk.
@@ -41,9 +47,11 @@ _This document acts as the definitive anchor for understanding system design, da
 - **POSIX Atomic Subtitle Writing**: NEVER write directly to `.srt`. Always write to `.movie.srt.tmp` first. ALWAYS inherit `st_uid`, `st_gid`, and `st_mode` from the source MKV using `os.chown` and `os.chmod` on the temp file. ALWAYS finalize with a true POSIX atomic swap: `os.replace()`.
 - **Architectural Boundary Changes**: If you change an architectural boundary, you MUST explicitly document the justification.
 
-## 7. Error Handling Patterns
-- Memory streams must not be blocked by arbitrary `.communicate()` limits.
-- Bounded concurrency protects against OOM (Out-of-Memory) errors during 24/7 watch loops.
+## 7. Error Handling Boundaries
+- **FFmpeg Subprocess Timeouts**: Must use `asyncio.wait_for()` to prevent zombie `ffmpeg` process holding up queues indefinitely if network drops.
+- **Memory Segmentation Faults**: If CTranslate2 crashes randomly, the worker must gracefully recover and un-queue the file rather than halting the daemon.
+- **Database Locks**: Handle `sqlite3.IntegrityError` or locked states gracefully. Retries should use exponential backoff, but given WAL mode, concurrent reads shouldn't block.
+- **EACCES/EPERM Permissions**: Gracefully warn and skip processing if the `.movie.srt.tmp` cannot inherit POSIX permissions of the source `.mkv`.
 
 ## 8. Directory Structure
 - `src/aisrt/cli.py`: Typer CLI entrypoint.
