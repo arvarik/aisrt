@@ -2,6 +2,12 @@
 
 _This document acts as the definitive anchor for understanding system design, data models, API contracts, and technology boundaries. Update this document during the Design and Review phases._
 
+## 0. Project Topology
+
+**Topology:** `[backend, ml-ai]`
+
+_Agents: Read the corresponding Gemstack topology profiles (`backend.md` and `ml-ai.md`) from `~/.gemini/antigravity/global_workflows/` before proceeding with any workflow step. These profiles enforce data integrity testing, Evaluation-Driven Development (EDD), circuit breaker cost controls, and prompt versioning._
+
 ## 1. Tech Stack & Infrastructure
 - **Language / Runtime**: Python 3.11+
 - **Backend / API**: Typer CLI, no frontend
@@ -38,6 +44,21 @@ _This document acts as the definitive anchor for understanding system design, da
   - Edge cases fallback to `int8` quantization or pure CPU execution.
   - Apple Silicon routes directly to Metal Performance Shaders (MPS).
 - **Media Processing**: Shells out to `ffmpeg`/`ffprobe` subprocesses. Avoids python AV bindings to minimize memory leaks and maximize codec compatibility.
+
+### Model Ledger (ML/AI Topology)
+
+_Documents every ML model in use. Required by the ml-ai topology profile for Circuit Breaker calculations._
+
+| Model | Role | Resource Requirements | Context/Input Limits | Structured Output | Rate Limit | Circuit Breaker Cap |
+|-------|------|----------------------|---------------------|-------------------|------------|---------------------|
+| `large-v3` | Primary transcription (high-VRAM CUDA) | CUDA GPU, VRAM ≥ 10 GB, `float16` compute | Unbounded audio input (streamed segments via VAD) | SRT subtitle segments with word-level timestamps | N/A (local inference) | N/A (local compute) |
+| `large-v3-turbo` | Primary transcription (mid-VRAM CUDA) | CUDA GPU, VRAM ≥ 6 GB, `float16` compute | Unbounded audio input (streamed segments via VAD) | SRT subtitle segments with word-level timestamps | N/A (local inference) | N/A (local compute) |
+| `large-v3-turbo` | Primary transcription (low-VRAM CUDA) | CUDA GPU, VRAM ≥ 4 GB, `int8_float16` compute | Unbounded audio input (streamed segments via VAD) | SRT subtitle segments with word-level timestamps | N/A (local inference) | N/A (local compute) |
+| `large-v3-turbo` | Primary transcription (Apple Silicon / high-RAM CPU) | CPU, RAM > 16 GB, `int8` compute, all physical cores | Unbounded audio input (streamed segments via VAD) | SRT subtitle segments with word-level timestamps | N/A (local inference) | N/A (local compute) |
+| `small.en` | Fallback transcription (low-resource CPU) | CPU, RAM ≤ 16 GB, `int8` compute, all physical cores | Unbounded audio input (streamed segments via VAD) | SRT subtitle segments with word-level timestamps | N/A (local inference) | N/A (local compute) |
+
+_Model selection is controlled by `ModelRouter.get_config()` in `src/aisrt/hardware.py`. User overrides via `--force-model`, `--force-device`, and `AISRT_HARDWARE__FORCE_MODEL` env var._
+
 
 ## 6. Invariants & Safety Rules
 - **Zero-Disk Extraction**: NEVER write `.wav`, `.mp4`, or `.ts` temp files to disk.
