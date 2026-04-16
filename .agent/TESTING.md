@@ -42,6 +42,48 @@ _This file tracks test methods, scenarios, and results with concrete execution e
 | Valid payload creates resource | UNTESTED | |
 | Invalid payload returns structured error | UNTESTED | |
 
+---
+
+## Backend Route Coverage Matrix
+
+_Populated by the SDET during the Trap phase. One row per CLI command or pipeline entry point._
+
+| Entry Point / Command | Input Type | Valid Input | Invalid Input | Error Recovery | Edge Cases |
+|-----------------------|------------|-------------|---------------|----------------|------------|
+| `aisrt scan <media_dir>` | CLI — dry-run directory scan | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `aisrt run <media_dir>` | CLI — live pipeline execution | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `aisrt run --watch` | CLI — daemon mode (continuous loop) | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `aisrt run --translate` | CLI — foreign audio → English | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `Pipeline._producer()` | Async — discovery → extraction queue | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `Pipeline._extractor_worker()` | Async — FFmpeg stdout → numpy array | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `Pipeline._inference_worker()` | Async — Whisper transcription → SRT | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `DiscoveryEngine.scan()` | Async — NAS-safe file crawl | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+| `AtomicWriter.write_srt()` | Sync — POSIX atomic `.srt` swap | UNTESTED | UNTESTED | UNTESTED | UNTESTED |
+
+---
+
+## Frontend Component State Matrix
+
+N/A — Frontend topology is not active for this project.
+
+---
+
+## ML / AI Evaluation Thresholds
+
+_Populated by the ML Engineer during the Build phase. Track transcription quality metrics._
+
+| Metric | Target | Current | Method | Eval Set | Model Config | Last Run |
+|--------|--------|---------|--------|----------|--------------|----------|
+| Word Error Rate (WER) | ≤ 10% | — | `jiwer` against reference transcripts | Not configured | `large-v3` / `float16` | — |
+| Character Error Rate (CER) | ≤ 5% | — | `jiwer` against reference transcripts | Not configured | `large-v3` / `float16` | — |
+| Processing Throughput (x realtime) | ≥ 5x on CUDA | — | `PipelineStats.total_audio_duration_secs / elapsed` | N/A | `large-v3` / `float16` | — |
+| Model Load Time | ≤ 30s | — | Wall clock from `STTWorker.initialize()` | N/A | `large-v3` / `float16` | — |
+| VAD False Positive Rate | ≤ 2% | — | Manual review of silence-heavy media | Not configured | All configs | — |
+
+### Eval / Holdout Boundary
+- **eval_set**: No eval set configured yet
+- **holdout_set**: No holdout set configured yet — HUMAN-ONLY when created
+
 ## Bugs Found (Fix Phase Queue)
 1. _(None currently)_
 

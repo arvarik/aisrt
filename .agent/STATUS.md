@@ -48,3 +48,19 @@ Ready for first feature ideation.
 
 ## Active Worktrees
 (none — sequential execution)
+
+---
+
+## Stub Audit Tracker
+
+N/A — Not a full-stack project. No frontend stubs.
+
+---
+
+## Prompt Versioning Changelog
+
+_Track changes to ML model configurations or processing parameters. Since this project uses ML inference (not LLM prompts), track model configuration changes here._
+
+| Version | Date | Change Description | Quality Impact | Delta | Config File |
+|---------|------|--------------------|----------------|-------|-------------|
+| v1.0 | 2026-04-14 | Baseline model routing: `large-v3` (CUDA ≥ 10 GB), `large-v3-turbo` (CUDA ≥ 6 GB / Apple Silicon / high-RAM CPU), `small.en` (low-resource CPU). Transcribe params: `beam_size=5`, `vad_filter=True`, `word_timestamps=True`, `no_speech_threshold=0.6`, `compression_ratio_threshold=2.4`. | Baseline | — | `src/aisrt/hardware.py`, `src/aisrt/pipeline.py` |
