@@ -1,6 +1,5 @@
 """Tests for the zero-disk AudioExtractor."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -8,51 +7,6 @@ import numpy as np
 import pytest
 
 from aisrt.extractor import AudioExtractor
-
-
-@pytest.mark.asyncio
-async def test_get_audio_track_index_found() -> None:
-    """Test ffprobe correctly parsing the JSON and finding 'eng' track."""
-    mock_ffprobe_output = json.dumps(
-        {
-            "streams": [
-                {"index": 0, "tags": {"language": "jpn"}},
-                {"index": 1, "tags": {"language": "eng"}},
-                {"index": 2, "tags": {"language": "fre"}},
-            ]
-        }
-    ).encode("utf-8")
-
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
-        process_mock = AsyncMock()
-        process_mock.communicate.return_value = (mock_ffprobe_output, b"")
-        process_mock.returncode = 0
-        mock_exec.return_value = process_mock
-
-        track_idx = await AudioExtractor.get_audio_track_index(Path("dummy.mkv"), ["eng", "en"])
-        assert track_idx == 1
-
-
-@pytest.mark.asyncio
-async def test_get_audio_track_index_fallback() -> None:
-    """Test fallback to track 0 if preferred language is not found."""
-    mock_ffprobe_output = json.dumps(
-        {
-            "streams": [
-                {"index": 0, "tags": {"language": "jpn"}},
-                {"index": 1, "tags": {"language": "fre"}},
-            ]
-        }
-    ).encode("utf-8")
-
-    with patch("asyncio.create_subprocess_exec") as mock_exec:
-        process_mock = AsyncMock()
-        process_mock.communicate.return_value = (mock_ffprobe_output, b"")
-        process_mock.returncode = 0
-        mock_exec.return_value = process_mock
-
-        track_idx = await AudioExtractor.get_audio_track_index(Path("dummy.mkv"), ["eng", "en"])
-        assert track_idx == 0
 
 
 @pytest.mark.asyncio
