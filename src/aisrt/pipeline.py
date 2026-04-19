@@ -9,6 +9,7 @@ from loguru import logger
 
 from aisrt.discovery import DiscoveryEngine, MediaFile
 from aisrt.extractor import AudioExtractor
+from aisrt.probing import get_audio_track_index
 
 
 @dataclass
@@ -125,9 +126,7 @@ class Pipeline:
                     status="EXTRACTING",
                 )
 
-                track_idx = await AudioExtractor.get_audio_track_index(
-                    media_file.path, self.target_languages
-                )
+                track_idx = await get_audio_track_index(media_file.path, self.target_languages)
                 audio_data = await AudioExtractor.extract_audio_to_memory(
                     media_file.path, track_idx
                 )

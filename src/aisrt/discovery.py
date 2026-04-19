@@ -1,7 +1,6 @@
 """NAS-Safe File Discovery Engine."""
 
 import asyncio
-import json
 import os
 import time
 from collections.abc import AsyncGenerator
@@ -11,6 +10,7 @@ from pathlib import Path
 from loguru import logger
 
 from aisrt.config import FilterConfig
+from aisrt.probing import has_embedded_subtitles, has_external_subtitle
 from aisrt.state import StateTracker
 
 
@@ -95,7 +95,7 @@ class DiscoveryEngine:
         if (current_time - media_file.mtime) < min_age_seconds:
             return f"SKIP: Modified recently (< {self.config.min_age_mins}m)"
 
-        if self._has_sibling_subtitle(media_file.path):
+        if has_external_subtitle(media_file.path, self.config.target_languages):
             return "SKIP: External sibling subtitle exists"
 
         db_state = await self.state_tracker.get_state(str(media_file.path))
@@ -111,7 +111,7 @@ class DiscoveryEngine:
         if db_state and db_state.status == "EMBEDDED_EXISTS":
             return "SKIP: Embedded English subtitle exists (Database)"
 
-        has_embedded = await self._check_embedded_subtitles(media_file.path)
+        has_embedded = await has_embedded_subtitles(media_file.path, self.config.target_languages)
         if has_embedded:
             await self.state_tracker.update_state(
                 file_path=str(media_file.path),
@@ -123,73 +123,3 @@ class DiscoveryEngine:
             return "SKIP: Embedded English subtitle detected"
 
         return "PROCESS"
-
-    def _has_sibling_subtitle(self, video_path: Path) -> bool:
-        """Check if an external SRT file exists next to the video."""
-        base_name = video_path.stem
-        dir_name = video_path.parent
-
-        check_suffixes = [".srt"]
-        for lang in self.config.target_languages:
-            check_suffixes.append(f".{lang}.srt")
-
-        for suffix in check_suffixes:
-            if (dir_name / f"{base_name}{suffix}").exists():
-                return True
-
-        return False
-
-    async def _check_embedded_subtitles(self, video_path: Path) -> bool:
-        """Run ffprobe to check if an embedded target-language subtitle exists."""
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "s",
-            "-show_entries",
-            "stream=index,codec_name:stream_tags=language",
-            "-of",
-            "json",
-            str(video_path),
-        ]
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await process.communicate()
-
-            if process.returncode != 0:
-                logger.warning(f"ffprobe failed on {video_path}")
-                return False
-
-            data = json.loads(stdout.decode("utf-8"))
-            streams = data.get("streams", [])
-
-            for stream in streams:
-                codec = stream.get("codec_name", "").lower()
-                tags = stream.get("tags", {})
-                lang = tags.get("language", "").lower()
-
-                # Only skip if we find a text-based subtitle track in the target language.
-                # Image-based subs (hdmv_pgs_subtitle) force transcodes on many players.
-                if lang in self.config.target_languages:
-                    if codec in ["subrip", "ass", "mov_text", "webvtt"]:
-                        return True
-                    else:
-                        logger.debug(
-                            f"Ignoring embedded {codec} subtitle in {video_path} (forces transcode)"
-                        )
-
-        except FileNotFoundError:
-            logger.error("ffprobe not found. Please ensure FFmpeg is installed and in PATH.")
-            raise
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse ffprobe JSON for {video_path}")
-        except Exception as e:
-            logger.warning(f"Error checking embedded streams for {video_path}: {e}")
-
-        return False

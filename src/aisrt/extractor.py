@@ -1,7 +1,6 @@
 """Zero-Disk Audio Extraction Engine."""
 
 import asyncio
-import json
 from pathlib import Path
 
 import numpy as np
@@ -10,62 +9,6 @@ from loguru import logger
 
 class AudioExtractor:
     """Extracts audio directly to memory (Zero-Disk) using FFmpeg."""
-
-    @staticmethod
-    async def get_audio_track_index(video_path: Path, target_languages: list[str]) -> int:
-        """Use ffprobe to find the best audio track index.
-
-        Prefers target languages (e.g., 'eng'). Falls back to the first audio track (0).
-
-        Args:
-            video_path: Path to the media file.
-            target_languages: List of preferred ISO-639 language codes.
-
-        Returns:
-            The relative audio track index (e.g., 0 for the first audio track).
-        """
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a",
-            "-show_entries",
-            "stream=index:stream_tags=language",
-            "-of",
-            "json",
-            str(video_path),
-        ]
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await process.communicate()
-
-            if process.returncode != 0:
-                logger.warning(f"ffprobe failed for {video_path}, defaulting to track 0.")
-                return 0
-
-            data = json.loads(stdout.decode("utf-8"))
-            streams = data.get("streams", [])
-
-            # We iterate to find the relative index of the target language track.
-            # ffmpeg's `-map 0:a:X` refers to the X-th stream, matching the list index here.
-            for i, stream in enumerate(streams):
-                tags = stream.get("tags", {})
-                lang = tags.get("language", "").lower()
-                if lang in target_languages:
-                    logger.debug(f"Found preferred language '{lang}' at audio track {i}")
-                    return i
-
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to probe audio tracks for {video_path}: {e}")
-
-        # Default to the first audio stream
-        return 0
 
     @staticmethod
     async def extract_audio_to_memory(

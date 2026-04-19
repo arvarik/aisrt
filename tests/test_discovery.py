@@ -63,7 +63,7 @@ async def test_scan_directory_basic(temp_media_dir: Path, filter_config: FilterC
 
     engine = DiscoveryEngine(temp_media_dir, filter_config, mock_tracker)
 
-    with patch.object(engine, "_check_embedded_subtitles", new_callable=AsyncMock) as mock_embedded:
+    with patch("aisrt.discovery.has_embedded_subtitles", new_callable=AsyncMock) as mock_embedded:
         mock_embedded.return_value = False
 
         results = []
@@ -103,7 +103,7 @@ async def test_scan_database_state(temp_media_dir: Path, filter_config: FilterCo
 
     engine = DiscoveryEngine(temp_media_dir, filter_config, mock_tracker)
 
-    with patch.object(engine, "_check_embedded_subtitles", new_callable=AsyncMock) as mock_embedded:
+    with patch("aisrt.discovery.has_embedded_subtitles", new_callable=AsyncMock) as mock_embedded:
         mock_embedded.return_value = False
 
         results = []
