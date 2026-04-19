@@ -72,6 +72,10 @@ class DiscoveryEngine:
 
         current_time = time.time()
 
+        # Pre-fetch all states and processed hardlinks to avoid N+1 database queries
+        all_states = await self.state_tracker.get_all_states()
+        processed_hardlinks = await self.state_tracker.get_all_processed_hardlinks()
+
         for file_path in all_files:
             try:
                 stat = file_path.stat()
@@ -85,10 +89,18 @@ class DiscoveryEngine:
                 logger.warning(f"Could not stat {file_path}: {e}")
                 continue
 
-            action_str = await self._analyze_file(media_file, current_time)
+            action_str = await self._analyze_file(
+                media_file, current_time, all_states, processed_hardlinks
+            )
             yield media_file, action_str
 
-    async def _analyze_file(self, media_file: MediaFile, current_time: float) -> str:
+    async def _analyze_file(
+        self,
+        media_file: MediaFile,
+        current_time: float,
+        all_states: dict[str, "FileState"] | None = None,
+        processed_hardlinks: set[tuple[int, int]] | None = None,
+    ) -> str:
         """Determine if a single file should be processed or skipped."""
         min_age_seconds = self.config.min_age_mins * 60
 
@@ -98,13 +110,23 @@ class DiscoveryEngine:
         if self._has_sibling_subtitle(media_file.path):
             return "SKIP: External sibling subtitle exists"
 
-        db_state = await self.state_tracker.get_state(str(media_file.path))
+        # Check pre-fetched states or fallback to individual query
+        if all_states is not None:
+            db_state = all_states.get(str(media_file.path))
+        else:
+            db_state = await self.state_tracker.get_state(str(media_file.path))
+
         if db_state and db_state.status == "COMPLETED" and db_state.size == media_file.size:
             return "SKIP: Already processed (Database)"
 
-        is_hardlink = await self.state_tracker.check_hardlink_processed(
-            media_file.inode, media_file.size
-        )
+        # Check pre-fetched hardlinks or fallback to individual query
+        if processed_hardlinks is not None:
+            is_hardlink = (media_file.inode, media_file.size) in processed_hardlinks
+        else:
+            is_hardlink = await self.state_tracker.check_hardlink_processed(
+                media_file.inode, media_file.size
+            )
+
         if is_hardlink:
             return "SKIP: Hardlink to already processed file"
 

@@ -148,6 +148,40 @@ class StateTracker:
             row = await cursor.fetchone()
             return row is not None
 
+    async def get_all_processed_hardlinks(self) -> set[tuple[int, int]]:
+        """Fetch all inode/size pairs that have already been processed.
+
+        Returns:
+            A set of (inode, size) tuples.
+        """
+        if not self._conn:
+            raise RuntimeError("Database connection not established.")
+
+        query = (
+            "SELECT inode, size FROM file_state "
+            "WHERE status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
+        )
+        async with self._conn.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return {(row[0], row[1]) for row in rows}
+
+    async def get_all_states(self) -> dict[str, FileState]:
+        """Fetch all tracked file states.
+
+        Returns:
+            A dictionary mapping file paths to FileState objects.
+        """
+        if not self._conn:
+            raise RuntimeError("Database connection not established.")
+
+        query = (
+            "SELECT file_path, inode, mtime, size, status, model_used, timestamp "
+            "FROM file_state"
+        )
+        async with self._conn.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return {row[0]: FileState(*row) for row in rows}
+
     async def update_state(
         self,
         file_path: str,
