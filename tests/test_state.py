@@ -1,6 +1,7 @@
 """Tests for the StateTracker sqlite manager."""
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -11,6 +12,25 @@ from aisrt.state import StateTracker
 def db_path(tmp_path: Path) -> Path:
     """Fixture providing a temporary database path."""
     return tmp_path / "test_state.db"
+
+
+@pytest.mark.asyncio
+async def test_state_tracker_close(db_path: Path) -> None:
+    """Test that close() cleans up the connection."""
+    tracker = StateTracker(db_path)
+
+    # Use a mock connection to verify close() is called
+    mock_conn = AsyncMock()
+    tracker._conn = mock_conn
+
+    await tracker.close()
+
+    mock_conn.close.assert_awaited_once()
+    assert tracker._conn is None
+
+    # Test idempotency - closing again should not raise error
+    await tracker.close()
+    assert tracker._conn is None
 
 
 @pytest.mark.asyncio
