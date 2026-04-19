@@ -113,6 +113,6 @@ def test_atomic_writer_success(tmp_path: Path) -> None:
         assert final_path.name == "movie.en.srt"
         assert final_path.read_text(encoding="utf-8") == content
 
-        # Temp file should be gone
-        temp_path = source_video.with_name(".movie.srt.tmp")
-        assert not temp_path.exists()
+        # Temp file should be gone. We check that no .tmp files remain in the directory.
+        temp_files = [f for f in tmp_path.iterdir() if f.name.endswith(".tmp")]
+        assert len(temp_files) == 0, f"Temporary files found: {temp_files}"
