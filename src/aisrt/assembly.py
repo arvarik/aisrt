@@ -1,6 +1,7 @@
 """Broadcast-quality SubRip (SRT) formatting and Atomic File I/O."""
 
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -150,7 +151,7 @@ class AtomicWriter:
             The Path to the finalized, atomically committed SRT file.
         """
         final_srt_path = source_video.with_suffix(f".{language_code}.srt")
-        temp_srt_path = source_video.with_name(f".{source_video.stem}.srt.tmp")
+        temp_srt_path = source_video.with_name(f".{source_video.stem}.{uuid.uuid4().hex}.srt.tmp")
 
         logger.debug(f"Assembling atomic SRT chunks in {temp_srt_path}")
 
