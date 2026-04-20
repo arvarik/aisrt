@@ -5,7 +5,7 @@
   [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
   [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
   [![Checked with mypy](https://img.shields.io/badge/mypy-strict-blue)](https://mypy-lang.org/)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 </div>
 
 ---
@@ -142,4 +142,4 @@ pytest tests           # Asynchronous Unit Tests
 ---
 
 ## 📜 License
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the Apache 2.0 License. See `LICENSE` for more information.
