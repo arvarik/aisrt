@@ -6,12 +6,16 @@ import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from aisrt.config import FilterConfig
 from aisrt.probing import has_embedded_subtitles, has_external_subtitle
 from aisrt.state import StateTracker
+
+if TYPE_CHECKING:
+    from aisrt.state import FileState
 
 
 @dataclass
@@ -48,8 +52,8 @@ class DiscoveryEngine:
         """
         loop = asyncio.get_running_loop()
 
-        def _walk(directory: Path) -> list[Path]:
-            paths = []
+        def _walk(directory: Path) -> list[MediaFile]:
+            files = []
             try:
                 for entry in os.scandir(directory):
                     path = Path(entry.path)
@@ -58,13 +62,26 @@ class DiscoveryEngine:
                         continue
 
                     if entry.is_dir(follow_symlinks=False):
-                        paths.extend(_walk(path))
-                    elif entry.is_file(follow_symlinks=False):
-                        if path.suffix.lower() in self.config.extensions:
-                            paths.append(path)
+                        files.extend(_walk(path))
+                    elif (
+                        entry.is_file(follow_symlinks=False)
+                        and path.suffix.lower() in self.config.extensions
+                    ):
+                        try:
+                            stat = entry.stat(follow_symlinks=False)
+                            files.append(
+                                MediaFile(
+                                    path=path,
+                                    size=stat.st_size,
+                                    mtime=stat.st_mtime,
+                                    inode=stat.st_ino,
+                                )
+                            )
+                        except OSError:
+                            pass
             except PermissionError:
                 logger.warning(f"Permission denied: {directory}")
-            return paths
+            return files
 
         logger.info(f"Starting directory scan at {self.media_dir}...")
         all_files = await loop.run_in_executor(None, _walk, self.media_dir)
@@ -76,19 +93,7 @@ class DiscoveryEngine:
         all_states = await self.state_tracker.get_all_states()
         processed_hardlinks = await self.state_tracker.get_all_processed_hardlinks()
 
-        for file_path in all_files:
-            try:
-                stat = file_path.stat()
-                media_file = MediaFile(
-                    path=file_path,
-                    size=stat.st_size,
-                    mtime=stat.st_mtime,
-                    inode=stat.st_ino,
-                )
-            except OSError as e:
-                logger.warning(f"Could not stat {file_path}: {e}")
-                continue
-
+        for media_file in all_files:
             action_str = await self._analyze_file(
                 media_file, current_time, all_states, processed_hardlinks
             )
@@ -142,6 +147,8 @@ class DiscoveryEngine:
                 size=media_file.size,
                 status="EMBEDDED_EXISTS",
             )
+            if processed_hardlinks is not None:
+                processed_hardlinks.add((media_file.inode, media_file.size))
             return "SKIP: Embedded English subtitle detected"
 
         return "PROCESS"

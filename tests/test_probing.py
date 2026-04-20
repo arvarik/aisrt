@@ -1,6 +1,5 @@
 """Tests for the probing utilities."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 

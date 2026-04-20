@@ -35,7 +35,8 @@ async def _run_ffprobe(video_path: Path, select_streams: str, show_entries: str)
             logger.warning(f"ffprobe failed for {video_path}: {stderr.decode().strip()}")
             return {}
 
-        return json.loads(stdout.decode("utf-8"))
+        result: dict[str, Any] = json.loads(stdout.decode("utf-8"))
+        return result
     except FileNotFoundError:
         logger.error("ffprobe not found. Please ensure FFmpeg is installed and in PATH.")
         raise
@@ -93,8 +94,4 @@ def has_external_subtitle(video_path: Path, target_languages: list[str]) -> bool
     for lang in target_languages:
         check_suffixes.append(f".{lang}.srt")
 
-    for suffix in check_suffixes:
-        if (dir_name / f"{base_name}{suffix}").exists():
-            return True
-
-    return False
+    return any((dir_name / f"{base_name}{suffix}").exists() for suffix in check_suffixes)

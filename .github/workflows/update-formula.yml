@@ -1,0 +1,65 @@
+name: Update Homebrew Formula
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for PyPI availability
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Waiting for aisrt $VERSION on PyPI..."
+          for i in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/aisrt/$VERSION/json" > /dev/null 2>&1; then
+              echo "Package available on PyPI"
+              exit 0
+            fi
+            echo "Attempt $i/30 — waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Package not found on PyPI after 5 minutes"
+          exit 1
+
+      - name: Download sdist and compute SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          URL="https://files.pythonhosted.org/packages/source/a/aisrt/aisrt-${VERSION}.tar.gz"
+          echo "Downloading $URL"
+          curl -fSL "$URL" -o aisrt.tar.gz
+          SHA256=$(sha256sum aisrt.tar.gz | cut -d' ' -f1)
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA256"
+
+      - name: Update Formula/aisrt.rb
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          SHA256="${{ steps.sha.outputs.sha256 }}"
+          sed -i "s|url \".*\"|url \"https://files.pythonhosted.org/packages/source/a/aisrt/aisrt-${VERSION}.tar.gz\"|" Formula/aisrt.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/aisrt.rb
+          echo "Updated Formula/aisrt.rb:"
+          cat Formula/aisrt.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/aisrt.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
+          git push origin main

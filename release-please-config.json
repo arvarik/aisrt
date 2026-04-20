@@ -1,0 +1,8 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "include-component-in-changelog": false
+    }
+  }
+}

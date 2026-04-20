@@ -1,5 +1,6 @@
 """Broadcast-quality SubRip (SRT) formatting and Atomic File I/O."""
 
+import contextlib
 import os
 import uuid
 from pathlib import Path
@@ -87,35 +88,49 @@ class SRTFormatter:
                 continue
 
             # Temporal gap check: flush if silence > 1.5s
-            if current_end > 0.0 and (word_obj.start - current_end) > 1.5:
-                if current_words and current_start is not None:
-                    self._flush_words(current_words, current_start, current_end)
-                    current_words = []
-                    current_start = None
-                    char_count = 0
-                    line_count = 1
+            if (
+                current_end > 0.0
+                and (word_obj.start - current_end) > 1.5
+                and current_words
+                and current_start is not None
+            ):
+                self._flush_words(current_words, current_start, current_end)
+                current_words = []
+                current_start = None
+                char_count = 0
+                line_count = 1
 
             if current_start is None:
                 current_start = word_obj.start
 
-            current_words.append(word_obj.word)
-            current_end = word_obj.end
-            char_count += len(word)
-
             is_terminal = any(word.endswith(p) for p in self.terminal_punctuation)
 
-            # If appending this word exceeds the line length, wrap BEFORE adding it
-            if char_count > self.max_chars_per_line and line_count < self.max_lines:
-                # Insert newline before the current word
-                current_words.pop()  # Remove the word we just added
-                current_words.append("\n")
-                current_words.append(word_obj.word.lstrip())
-                char_count = len(word)
-                line_count += 1
+            # Predict if adding this word will break lengths
+            predicted_len = char_count + len(word)
 
-            is_too_long = char_count >= self.max_chars_per_line
+            if predicted_len > self.max_chars_per_line:
+                if line_count < self.max_lines:
+                    # Break to the second line
+                    current_words.append("\n")
+                    current_words.append(word_obj.word.lstrip())
+                    char_count = len(word)
+                    line_count += 1
+                    current_end = word_obj.end
+                else:
+                    # Burst limit reached -> flush previous block THEN seed a new one
+                    self._flush_words(current_words, current_start, current_end)
+                    current_words = [word_obj.word.lstrip()]
+                    current_start = word_obj.start
+                    current_end = word_obj.end
+                    char_count = len(word)
+                    line_count = 1
+            else:
+                # Safe to append normally
+                current_words.append(word_obj.word)
+                current_end = word_obj.end
+                char_count = predicted_len
 
-            if is_terminal or (is_too_long and line_count >= self.max_lines):
+            if is_terminal:
                 self._flush_words(current_words, current_start, current_end)
                 current_words = []
                 current_start = None
@@ -172,7 +187,9 @@ class AtomicWriter:
                 )
 
             try:
-                os.chmod(temp_srt_path, stat.st_mode)
+                # Discard executable bits mapping natively (0o666) to pass SAST bounds safely
+                safe_mode = stat.st_mode & 0o666
+                os.chmod(temp_srt_path, safe_mode)
             except PermissionError:
                 logger.debug(f"Insufficient permissions to chmod {temp_srt_path}")
 
@@ -186,8 +203,6 @@ class AtomicWriter:
         except Exception as e:
             # Clean up the temp file if the atomic commit fails
             if temp_srt_path.exists():
-                try:
+                with contextlib.suppress(OSError):
                     temp_srt_path.unlink()
-                except OSError:
-                    pass
             raise RuntimeError(f"Atomic subtitle write failed for {source_video.name}: {e}") from e

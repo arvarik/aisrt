@@ -39,7 +39,7 @@ COPY pyproject.toml README.md ./
 COPY src/ src/
 
 # Install the application into the virtual environment
-RUN pip install --no-cache-dir .
+RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0" pip install --no-cache-dir .
 
 # Create a directory for the SQLite state database
 # This should be mapped to a local volume to prevent DB corruption over network shares

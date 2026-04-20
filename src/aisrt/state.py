@@ -158,8 +158,7 @@ class StateTracker:
             raise RuntimeError("Database connection not established.")
 
         query = (
-            "SELECT inode, size FROM file_state "
-            "WHERE status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
+            "SELECT inode, size FROM file_state WHERE status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
         )
         async with self._conn.execute(query) as cursor:
             rows = await cursor.fetchall()
@@ -175,8 +174,7 @@ class StateTracker:
             raise RuntimeError("Database connection not established.")
 
         query = (
-            "SELECT file_path, inode, mtime, size, status, model_used, timestamp "
-            "FROM file_state"
+            "SELECT file_path, inode, mtime, size, status, model_used, timestamp FROM file_state"
         )
         async with self._conn.execute(query) as cursor:
             rows = await cursor.fetchall()

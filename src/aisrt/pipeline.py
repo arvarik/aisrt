@@ -15,6 +15,7 @@ from aisrt.probing import get_audio_track_index
 @dataclass
 class PipelineStats:
     """Statistics for a single pipeline run."""
+
     files_scanned: int = 0
     files_skipped: int = 0
     files_processed: int = 0
@@ -64,7 +65,7 @@ class Pipeline:
         """Start the entire pipeline and wait for completion."""
         logger.info("Initializing async TaskGroup pipeline...")
         self.stats.start_time = time.time()
-        
+
         async with asyncio.TaskGroup() as tg:
             # We use a supervisor task to manage the graceful teardown of workers
             tg.create_task(self._orchestrator(tg))
@@ -134,8 +135,17 @@ class Pipeline:
                 # Push to GPU queue. This will block (backpressure) if the GPU is busy.
                 await self.inference_queue.put(InferenceJob(media_file, audio_data))
 
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error(f"Extractor {worker_id} failed on {media_file.path.name}: {e}")
+                await self.discovery.state_tracker.update_state(
+                    file_path=str(media_file.path),
+                    inode=media_file.inode,
+                    mtime=media_file.mtime,
+                    size=media_file.size,
+                    status="FAILED",
+                )
                 # We do not crash the pipeline on a bad MKV.
             finally:
                 self.extraction_queue.task_done()
@@ -169,7 +179,7 @@ class Pipeline:
                 logger.info(f"GPU processing: {job.media_file.path.name}...")
 
                 # Execute inference in the dedicated STT thread pool
-                def _run_inference(current_job: InferenceJob) -> str | None:
+                def _run_inference(current_job: InferenceJob) -> tuple[str | None, float]:
                     if not stt_worker.model:
                         raise RuntimeError("Whisper model is not initialized.")
 
@@ -191,9 +201,15 @@ class Pipeline:
                     segments, info = stt_worker.model.transcribe(
                         current_job.audio_data, **transcribe_kwargs
                     )
-                    self.stats.total_audio_duration_secs += info.duration
 
-                    from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, BarColumn, TextColumn
+                    from rich.progress import (
+                        BarColumn,
+                        Progress,
+                        SpinnerColumn,
+                        TextColumn,
+                        TimeElapsedColumn,
+                    )
+
                     from aisrt.cli import console
 
                     with Progress(
@@ -206,18 +222,24 @@ class Pipeline:
                         transient=True,
                     ) as progress:
                         task = progress.add_task(
-                            f"Transcribing {current_job.media_file.path.name}...", 
-                            total=info.duration
+                            f"Transcribing {current_job.media_file.path.name}...",
+                            total=info.duration,
                         )
 
-                        def _segment_generator():
+                        from collections.abc import Iterator
+                        from typing import Any
+
+                        def _segment_generator() -> Iterator[Any]:
                             for segment in segments:
                                 progress.update(task, completed=segment.end)
                                 yield segment
-                        
-                        return formatter.format_segments(_segment_generator())
 
-                srt_content = await loop.run_in_executor(stt_worker.executor, _run_inference, job)
+                        return formatter.format_segments(_segment_generator()), info.duration
+
+                srt_content, duration = await loop.run_in_executor(
+                    stt_worker.executor, _run_inference, job
+                )
+                self.stats.total_audio_duration_secs += duration
 
                 if srt_content and srt_content.strip():
                     await loop.run_in_executor(
@@ -248,15 +270,25 @@ class Pipeline:
                     logger.warning(f"No speech detected in {job.media_file.path.name}")
                     self.stats.files_failed += 1
 
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error(f"Inference failed on {job.media_file.path.name}: {e}")
                 self.stats.files_failed += 1
+                await self.discovery.state_tracker.update_state(
+                    file_path=str(job.media_file.path),
+                    inode=job.media_file.inode,
+                    mtime=job.media_file.mtime,
+                    size=job.media_file.size,
+                    status="FAILED",
+                )
             finally:
                 self.inference_queue.task_done()
-                
+
                 # Clean up memory explicitly
                 del job.audio_data
                 import gc
+
                 gc.collect()
 
         logger.debug("Inference worker cleanly shut down.")

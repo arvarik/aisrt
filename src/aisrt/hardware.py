@@ -1,6 +1,5 @@
 """Hardware profiling and AI routing for the SRT Generator."""
 
-import os
 import platform
 from dataclasses import dataclass
 
@@ -41,15 +40,16 @@ class HardwareProfiler:
             import pynvml
 
             pynvml.nvmlInit()
-            device_count = pynvml.nvmlDeviceGetCount()
-            if device_count > 0:
-                # We target the primary GPU (index 0)
-                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                vram_gb = info.total / (1024**3)
+            try:
+                device_count = pynvml.nvmlDeviceGetCount()
+                if device_count > 0:
+                    # We target the primary GPU (index 0)
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    vram_gb = info.total / (1024**3)
+                    return True, vram_gb
+            finally:
                 pynvml.nvmlShutdown()
-                return True, vram_gb
-            pynvml.nvmlShutdown()
         except (ImportError, Exception) as e:
             logger.debug(f"CUDA/NVML not available or failed to initialize: {e}")
 
@@ -130,10 +130,3 @@ class ModelRouter:
             f"Compute: {config.compute_type}, Threads: {config.cpu_threads}"
         )
         return config
-
-
-def setup_thread_safety() -> None:
-    """Ensure underlying C libraries do not thrash threads."""
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"

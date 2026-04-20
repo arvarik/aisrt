@@ -1,0 +1,87 @@
+name: Release
+
+# Creates a GitHub Release with changelog and artifacts
+# when a version tag is pushed. Runs after PyPI upload.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  github-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for PyPI availability
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          echo "Waiting for aisrt $VERSION on PyPI..."
+          for i in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/aisrt/$VERSION/json" > /dev/null 2>&1; then
+              echo "✅ Package available on PyPI"
+              exit 0
+            fi
+            echo "  Attempt $i/30 — waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Package not found on PyPI after 5 minutes"
+          exit 1
+
+      - name: Download release artifacts from PyPI
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          mkdir -p dist/
+          WHEEL_URL=$(curl -sf "https://pypi.org/pypi/aisrt/$VERSION/json" \
+            | python3 -c "import sys,json; urls=json.load(sys.stdin)['urls']; print(next(u['url'] for u in urls if u['packagetype']=='bdist_wheel'))")
+          curl -fSL "$WHEEL_URL" -o "dist/aisrt-${VERSION}-py3-none-any.whl"
+          SDIST_URL=$(curl -sf "https://pypi.org/pypi/aisrt/$VERSION/json" \
+            | python3 -c "import sys,json; urls=json.load(sys.stdin)['urls']; print(next(u['url'] for u in urls if u['packagetype']=='sdist'))")
+          curl -fSL "$SDIST_URL" -o "dist/aisrt-${VERSION}.tar.gz"
+          ls -lh dist/
+
+      - name: Extract changelog for this version
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          if [ -f "CHANGELOG.md" ]; then
+            NOTES=$(awk "/^## \\[$VERSION\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES="Release v${VERSION}. See [CHANGELOG.md](https://github.com/arvarik/aisrt/blob/main/CHANGELOG.md) for details."
+          fi
+          echo "$NOTES" > /tmp/release-notes.md
+          cat >> /tmp/release-notes.md << 'EOF'
+
+          ---
+
+          ## Install
+
+          ```bash
+          pipx install aisrt     # Recommended
+          uv tool install aisrt  # Fastest
+          pip install aisrt      # Standard
+          ```
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "aisrt ${{ steps.meta.outputs.tag }}"
+          body_path: /tmp/release-notes.md
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(steps.meta.outputs.tag, '-') }}
