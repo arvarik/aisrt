@@ -51,19 +51,11 @@ For maximum stability and ease-of-use with NVIDIA hardware, use the provided Doc
 **Prerequisites:** Python 3.11+ and `ffmpeg` must be installed on your system.
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/arvarik/aisrt.git
-cd aisrt
+# Install securely into an isolated environment (Recommended)
+pipx install aisrt
 
-# 2. Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 3. Install the application
-pip install -e .
-
-# 4. (Optional) Install development dependencies
-pip install -e ".[dev]"
+# OR via standard pip
+pip install aisrt
 ```
 
 ---
