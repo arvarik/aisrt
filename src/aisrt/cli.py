@@ -1,5 +1,12 @@
 """CLI commands for the SRT Generator."""
 
+import os
+
+# Ensure underlying C libraries do not thrash threads BEFORE importing modules.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 import asyncio
 import sys
 from pathlib import Path
@@ -12,7 +19,7 @@ from rich.table import Table
 
 from aisrt.config import AppConfig, FilterConfig, HardwareConfig
 from aisrt.discovery import DiscoveryEngine
-from aisrt.hardware import HardwareProfiler, ModelRouter, setup_thread_safety
+from aisrt.hardware import HardwareProfiler, ModelRouter
 from aisrt.state import StateTracker
 
 app = typer.Typer(help="Ultimate SRT Generator", add_completion=False)
@@ -48,7 +55,6 @@ def scan(
     )
 
     # 1. Profile Hardware
-    setup_thread_safety()
     console.print("\n[bold cyan]1. Profiling Hardware...[/bold cyan]")
     profile = HardwareProfiler.profile()
     _ = ModelRouter.get_config(profile, config.hardware)
@@ -126,8 +132,6 @@ def run(
         filters=flt_config,
     )
 
-    setup_thread_safety()
-
     console.print("\n[bold cyan]1. Profiling Hardware & Initializing Models...[/bold cyan]")
     profile = HardwareProfiler.profile()
     model_cfg = ModelRouter.get_config(profile, config.hardware)
@@ -151,13 +155,13 @@ def run(
                     engine, cpu_cores=profile.physical_cores, translate=config.translate
                 )
                 stats = await pipeline.run()
-                
+
                 from rich.panel import Panel
-                
+
                 elapsed = stats.end_time - stats.start_time
                 audio_hours = stats.total_audio_duration_secs / 3600
                 speed = (stats.total_audio_duration_secs / elapsed) if elapsed > 0 else 0
-                
+
                 stats_msg = (
                     f"Files Scanned: [cyan]{stats.files_scanned}[/cyan] | "
                     f"Processed: [green]{stats.files_processed}[/green] | "

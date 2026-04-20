@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 from aisrt.config import HardwareConfig
-from aisrt.hardware import HardwareProfile, HardwareProfiler, ModelRouter, setup_thread_safety
+from aisrt.hardware import HardwareProfile, HardwareProfiler, ModelRouter
 
 
 def test_hardware_profile_apple_silicon() -> None:
@@ -107,12 +107,3 @@ def test_profiler_execution(mock_psutil: MagicMock) -> None:
         assert profile.ram_gb == 16.0
         assert profile.physical_cores == 4
         assert not profile.is_apple_silicon
-
-
-def test_setup_thread_safety() -> None:
-    """Ensure environment variables are set."""
-    import os
-
-    setup_thread_safety()
-    assert os.environ.get("OMP_NUM_THREADS") == "1"
-    assert os.environ.get("MKL_NUM_THREADS") == "1"

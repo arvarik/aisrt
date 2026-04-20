@@ -122,6 +122,9 @@ async def test_reset_stale_states(db_path: Path) -> None:
         s2 = await tracker.get_state("/movies/2.mkv")
         s3 = await tracker.get_state("/movies/3.mkv")
 
-        assert s1 is not None and s1.status == "PENDING"
-        assert s2 is not None and s2.status == "PENDING"
-        assert s3 is not None and s3.status == "COMPLETED"  # Should remain unchanged
+        assert s1 is not None
+        assert s1.status == "PENDING"
+        assert s2 is not None
+        assert s2.status == "PENDING"
+        assert s3 is not None
+        assert s3.status == "COMPLETED"

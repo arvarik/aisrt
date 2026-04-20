@@ -45,6 +45,7 @@ class STTWorker:
             logger.info("Authenticating with HuggingFace Hub to bypass rate limits...")
             try:
                 from huggingface_hub import login
+
                 login(token=hf_token)
             except Exception as e:
                 logger.warning(f"HuggingFace login failed: {e}")

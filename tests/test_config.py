@@ -24,9 +24,9 @@ def test_filter_config_defaults() -> None:
     assert "eng" in config.target_languages
 
 
-def test_app_config_defaults() -> None:
+def test_app_config_defaults(tmp_path: Path) -> None:
     """Test AppConfig initialization and defaults."""
-    media_dir = Path("/tmp/media")
+    media_dir = tmp_path / "media"
     config = AppConfig(media_dir=media_dir)
     assert config.media_dir == media_dir
     assert config.dry_run is False

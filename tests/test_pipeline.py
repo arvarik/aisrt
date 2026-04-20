@@ -34,8 +34,11 @@ async def test_pipeline_execution(mock_discovery: DiscoveryEngine) -> None:
     """Test that the orchestrator routes tasks through extractors and inference correctly."""
     pipeline = Pipeline(mock_discovery, cpu_cores=2)
 
-    with patch("aisrt.pipeline.AudioExtractor") as mock_ext:
-        mock_ext.get_audio_track_index = AsyncMock(return_value=0)
+    with (
+        patch("aisrt.pipeline.AudioExtractor") as mock_ext,
+        patch("aisrt.pipeline.get_audio_track_index", new_callable=AsyncMock) as mock_track,
+    ):
+        mock_track.return_value = 0
         mock_ext.extract_audio_to_memory = AsyncMock(return_value=np.zeros(10))
 
         completed_jobs = []

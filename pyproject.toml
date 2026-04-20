@@ -1,35 +1,60 @@
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.26", "hatch-vcs"]
+build-backend = "hatchling.build"
 
-[tool.poetry]
+[project]
 name = "aisrt"
-version = "1.1.0"
+dynamic = ["version"]
 description = "Hardware-aware, concurrent pipeline for subtitle generation."
-authors = ["Arvind <arvind.arik@gmail.com>"]
 readme = "README.md"
-packages = [{include = "aisrt", from = "src"}]
+requires-python = ">=3.11"
+authors = [
+    { name = "Arvind", email = "arvind.arik@gmail.com" },
+]
+# Not specifying license or classifiers for now as they weren't in poetry, but adding basics:
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Environment :: Console",
+    "Typing :: Typed",
+]
 
-[tool.poetry.scripts]
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "loguru>=0.7.2",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+    "aiosqlite>=0.19.0",
+    "psutil>=5.9.8",
+    "pynvml>=11.5.0",
+    "faster-whisper>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.5",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "pip-audit>=2.7.0"
+]
+
+[project.scripts]
 aisrt = "aisrt.cli:app"
 
-[tool.poetry.dependencies]
-python = "^3.11"
-typer = {extras = ["all"], version = "^0.12.0"}
-rich = "^13.7.0"
-loguru = "^0.7.2"
-pydantic = "^2.5.3"
-pydantic-settings = "^2.1.0"
-aiosqlite = "^0.19.0"
-psutil = "^5.9.8"
-pynvml = "^11.5.0"
-faster-whisper = "^1.0.0"
+# --- Version from Git tags ---
+[tool.hatch.version]
+source = "vcs"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.5"
-ruff = "^0.2.0"
-mypy = "^1.8.0"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/aisrt/_version.py"
+
+# --- Build targets ---
+[tool.hatch.build.targets.wheel]
+packages = ["src/aisrt"]
 
 [tool.ruff]
 line-length = 100
@@ -37,17 +62,31 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "C",  # flake8-comprehensions
-    "B",  # flake8-bugbear
-    "UP", # pyupgrade
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "C4",   # flake8-comprehensions
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "S",    # flake8-bandit
+    "PT",   # flake8-pytest-style
 ]
-ignore = []
+ignore = [
+    "S101",   # Allow assert in tests
+    "B008",   # Allow typer.Option/etc in defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S104", "PT012"]
+"src/aisrt/_version.py" = ["UP036"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

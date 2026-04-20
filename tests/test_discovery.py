@@ -58,6 +58,8 @@ def temp_media_dir(tmp_path: Path) -> Path:
 async def test_scan_directory_basic(temp_media_dir: Path, filter_config: FilterConfig) -> None:
     """Test basic scanning, recency filtering, sibling checking, and exclusions."""
     mock_tracker = AsyncMock(spec=StateTracker)
+    mock_tracker.get_all_states.return_value = {}
+    mock_tracker.get_all_processed_hardlinks.return_value = set()
     mock_tracker.get_state.return_value = None
     mock_tracker.check_hardlink_processed.return_value = False
 
@@ -99,6 +101,10 @@ async def test_scan_database_state(temp_media_dir: Path, filter_config: FilterCo
         status="COMPLETED",
         model_used="model",
     )
+    mock_tracker.get_all_states.return_value = {
+        str(temp_media_dir / "valid_movie.mkv"): completed_state
+    }
+    mock_tracker.get_all_processed_hardlinks.return_value = set()
     mock_tracker.get_state.return_value = completed_state
 
     engine = DiscoveryEngine(temp_media_dir, filter_config, mock_tracker)

@@ -89,12 +89,18 @@ class AudioExtractor:
             ) from err
 
         if process.returncode != 0:
-            error_msg = stderr_bytes.decode().strip()
+            error_msg = stderr_bytes.decode(errors="replace").strip()
             raise RuntimeError(f"FFmpeg extraction failed for {video_path}: {error_msg}")
 
         if not audio_bytes:
             raise RuntimeError(f"FFmpeg extraction resulted in empty output for {video_path}")
 
         # Convert raw 16-bit PCM bytes to 32-bit float normalized between -1.0 and 1.0
-        audio_np = np.frombuffer(audio_bytes, np.int16).astype(np.float32) / 32768.0
-        return audio_np
+        loop = asyncio.get_running_loop()
+
+        def _convert_to_np() -> np.ndarray:
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+            audio_np /= 32768.0
+            return audio_np
+
+        return await loop.run_in_executor(None, _convert_to_np)
