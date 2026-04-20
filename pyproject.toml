@@ -11,8 +11,9 @@ requires-python = ">=3.11"
 authors = [
     { name = "Arvind", email = "arvind.arik@gmail.com" },
 ]
-# Not specifying license or classifiers for now as they weren't in poetry, but adding basics:
+license = { text = "Apache-2.0" }
 classifiers = [
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
