@@ -96,3 +96,16 @@ _Populated by the ML Engineer during the Build phase. Track transcription qualit
 | Zero-disk extraction via FFmpeg | | |
 | Atomic POSIX swap of `.srt` | | |
 | Bounded memory queue limits | | |
+
+### Backend Route Coverage
+
+| Route | Method | Auth | Contract Test | Integration Test |
+|-------|--------|------|---------------|------------------|
+| _Fill in your routes_ | | | | |
+
+### ML/AI Evaluation Thresholds
+
+| Metric | Baseline | Target | Current | Status |
+|--------|----------|--------|---------|--------|
+| _Fill in your metrics_ | | | | |
+
