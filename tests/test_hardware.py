@@ -1,6 +1,5 @@
 """Tests for the HardwareProfiler and ModelRouter."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 from aisrt.config import HardwareConfig
