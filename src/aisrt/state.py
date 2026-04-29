@@ -82,6 +82,7 @@ class StateTracker:
     @require_conn
     async def setup(self) -> None:
         """Create the necessary tables if they do not exist."""
+        assert self._conn is not None
         # Dropping table if it exists with the old schema (device_id)
         # to ensure clean upgrade for new users.
         try:
@@ -128,6 +129,7 @@ class StateTracker:
         Returns:
             The FileState object if it exists, otherwise None.
         """
+        assert self._conn is not None
         query = (
             "SELECT file_path, inode, mtime, size, status, model_used, timestamp "
             "FROM file_state WHERE file_path = ?"
@@ -149,6 +151,7 @@ class StateTracker:
         Returns:
             True if this exact file data has been successfully processed under any path.
         """
+        assert self._conn is not None
         query = (
             "SELECT 1 FROM file_state "
             "WHERE inode = ? AND size = ? "
@@ -165,6 +168,7 @@ class StateTracker:
         Returns:
             A set of (inode, size) tuples.
         """
+        assert self._conn is not None
         query = (
             "SELECT inode, size FROM file_state WHERE status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
         )
@@ -179,6 +183,7 @@ class StateTracker:
         Returns:
             A dictionary mapping file paths to FileState objects.
         """
+        assert self._conn is not None
         query = (
             "SELECT file_path, inode, mtime, size, status, model_used, timestamp FROM file_state"
         )
@@ -206,6 +211,7 @@ class StateTracker:
             status: Processing status (PENDING, EXTRACTING, COMPLETED, etc.).
             model_used: The STT model string used if completed.
         """
+        assert self._conn is not None
         query = """
             INSERT INTO file_state (
                 file_path, inode, mtime, size, status, model_used, timestamp
@@ -230,6 +236,7 @@ class StateTracker:
 
         This prevents files from being permanently stuck if the daemon crashed.
         """
+        assert self._conn is not None
         query = (
             "UPDATE file_state SET status = 'PENDING' WHERE status IN ('EXTRACTING', 'INFERENCING')"
         )
