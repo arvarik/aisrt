@@ -1,11 +1,27 @@
 """SQLite state tracker for media files processing."""
 
+import functools
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
 import aiosqlite
 from loguru import logger
+
+T = TypeVar("T", bound=Callable[..., Any])
+
+
+def require_conn(method: T) -> T:
+    """Decorator to ensure the database connection is established."""
+
+    @functools.wraps(method)
+    async def wrapper(self: "StateTracker", *args: Any, **kwargs: Any) -> Any:
+        if not self._conn:
+            raise RuntimeError("Database connection not established.")
+        return await method(self, *args, **kwargs)
+
+    return cast(T, wrapper)
 
 
 @dataclass
@@ -63,11 +79,9 @@ class StateTracker:
         await self.setup()
         await self.reset_stale_states()
 
+    @require_conn
     async def setup(self) -> None:
         """Create the necessary tables if they do not exist."""
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         # Dropping table if it exists with the old schema (device_id)
         # to ensure clean upgrade for new users.
         try:
@@ -104,6 +118,7 @@ class StateTracker:
             await self._conn.close()
             self._conn = None
 
+    @require_conn
     async def get_state(self, file_path: str) -> FileState | None:
         """Retrieve the state of a given file by path.
 
@@ -113,9 +128,6 @@ class StateTracker:
         Returns:
             The FileState object if it exists, otherwise None.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = (
             "SELECT file_path, inode, mtime, size, status, model_used, timestamp "
             "FROM file_state WHERE file_path = ?"
@@ -126,6 +138,7 @@ class StateTracker:
                 return FileState(*row)
         return None
 
+    @require_conn
     async def check_hardlink_processed(self, inode: int, size: int) -> bool:
         """Check if an identical inode/size pair has already been completed.
 
@@ -136,9 +149,6 @@ class StateTracker:
         Returns:
             True if this exact file data has been successfully processed under any path.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = (
             "SELECT 1 FROM file_state "
             "WHERE inode = ? AND size = ? "
@@ -148,15 +158,13 @@ class StateTracker:
             row = await cursor.fetchone()
             return row is not None
 
+    @require_conn
     async def get_all_processed_hardlinks(self) -> set[tuple[int, int]]:
         """Fetch all inode/size pairs that have already been processed.
 
         Returns:
             A set of (inode, size) tuples.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = (
             "SELECT inode, size FROM file_state WHERE status IN ('COMPLETED', 'EMBEDDED_EXISTS')"
         )
@@ -164,15 +172,13 @@ class StateTracker:
             rows = await cursor.fetchall()
             return {(row[0], row[1]) for row in rows}
 
+    @require_conn
     async def get_all_states(self) -> dict[str, FileState]:
         """Fetch all tracked file states.
 
         Returns:
             A dictionary mapping file paths to FileState objects.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = (
             "SELECT file_path, inode, mtime, size, status, model_used, timestamp FROM file_state"
         )
@@ -180,6 +186,7 @@ class StateTracker:
             rows = await cursor.fetchall()
             return {row[0]: FileState(*row) for row in rows}
 
+    @require_conn
     async def update_state(
         self,
         file_path: str,
@@ -199,9 +206,6 @@ class StateTracker:
             status: Processing status (PENDING, EXTRACTING, COMPLETED, etc.).
             model_used: The STT model string used if completed.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = """
             INSERT INTO file_state (
                 file_path, inode, mtime, size, status, model_used, timestamp
@@ -220,14 +224,12 @@ class StateTracker:
         )
         await self._conn.commit()
 
+    @require_conn
     async def reset_stale_states(self) -> None:
         """Reset any EXTRACTING or INFERENCING status back to PENDING.
 
         This prevents files from being permanently stuck if the daemon crashed.
         """
-        if not self._conn:
-            raise RuntimeError("Database connection not established.")
-
         query = (
             "UPDATE file_state SET status = 'PENDING' WHERE status IN ('EXTRACTING', 'INFERENCING')"
         )
