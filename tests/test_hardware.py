@@ -1,5 +1,6 @@
 """Tests for the HardwareProfiler and ModelRouter."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from aisrt.config import HardwareConfig
@@ -107,3 +108,39 @@ def test_profiler_execution(mock_psutil: MagicMock) -> None:
         assert profile.ram_gb == 16.0
         assert profile.physical_cores == 4
         assert not profile.is_apple_silicon
+
+
+def test_get_cuda_info_import_error() -> None:
+    """Test _get_cuda_info when pynvml is not installed."""
+    with patch.dict("sys.modules", {"pynvml": None}):
+        has_cuda, vram = HardwareProfiler._get_cuda_info()
+        assert has_cuda is False
+        assert vram == 0.0
+
+
+def test_get_cuda_info_init_failure() -> None:
+    """Test _get_cuda_info when nvmlInit fails."""
+    mock_pynvml = MagicMock()
+    mock_pynvml.nvmlInit.side_effect = Exception("Initialization failed")
+
+    with patch.dict("sys.modules", {"pynvml": mock_pynvml}):
+        has_cuda, vram = HardwareProfiler._get_cuda_info()
+        assert has_cuda is False
+        assert vram == 0.0
+        mock_pynvml.nvmlInit.assert_called_once()
+        # Shutdown should NOT be called if Init failed
+        mock_pynvml.nvmlShutdown.assert_not_called()
+
+
+def test_get_cuda_info_get_count_failure() -> None:
+    """Test _get_cuda_info when nvmlDeviceGetCount fails."""
+    mock_pynvml = MagicMock()
+    mock_pynvml.nvmlDeviceGetCount.side_effect = Exception("GetCount failed")
+
+    with patch.dict("sys.modules", {"pynvml": mock_pynvml}):
+        has_cuda, vram = HardwareProfiler._get_cuda_info()
+        assert has_cuda is False
+        assert vram == 0.0
+        mock_pynvml.nvmlInit.assert_called_once()
+        # Shutdown SHOULD be called if Init succeeded but subsequent call failed
+        mock_pynvml.nvmlShutdown.assert_called_once()
