@@ -106,8 +106,9 @@ class Pipeline:
 
         # Broadcast termination sentinels to all extractors
         logger.debug("Producer finished. Sending shutdown sentinels to extractors.")
-        for _ in range(self.extraction_queue.maxsize):
-            await self.extraction_queue.put(None)
+        await asyncio.gather(
+            *(self.extraction_queue.put(None) for _ in range(self.extraction_queue.maxsize))
+        )
 
     async def _extractor_worker(self, worker_id: int) -> None:
         """Pops files, extracts audio to memory, and pushes to inference."""
