@@ -20,7 +20,7 @@ _This file tracks test methods, scenarios, and results with concrete execution e
 - **Run all tests**: `pytest tests/` (using `pytest-asyncio` for async tests).
 - **Async Fixtures**: All core worker logic tests must utilize `pytest.mark.asyncio` and yield safely closed `asyncio.Queue` objects.
 - **NAS-Edge Mocking**: Extensively mock `os.stat` to simulate NAS environment states (e.g., changing `inode` across network dropouts, or testing `os.replace` throwing `EACCES` permission errors).
-- **OOM Constraint Checks**: Inject mock oversized `bytearray` streams to validate that `asyncio.Queue(maxsize=3)` successfully blocks the extraction producer, verifying the daemon will not crash the host's RAM.
+- **Memory Bound Checks**: Exercise `MemoryBudget` directly. Confirm a waiter blocks until a release, that a file larger than the whole budget still runs rather than deadlocking, and that a release never drives the counter negative.
 
 ### Type Checking & Linting
 - **Type Checking**: `mypy src/aisrt tests --strict` (must produce 0 errors).

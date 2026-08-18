@@ -1,29 +1,35 @@
-version: "3.8"
-
 services:
   aisrt:
     image: ghcr.io/arvarik/aisrt:latest
     container_name: aisrt
-    # CRITICAL: Prevents CTranslate2 shared-memory core dumps when processing large files.
-    shm_size: '4gb'
+    # CTranslate2 needs shared memory for its worker pool. The Docker default of
+    # 64 MB is not enough and shows up as a core dump on a large file.
+    shm_size: "4gb"
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+
     environment:
-      # Expose all GPUs to the container.
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Bypass the anonymous Hugging Face rate limit when downloading a model.
       - HF_TOKEN=${HF_TOKEN:-}
-      # (Optional) You can override the hardware detector by forcing variables here:
-      # - FORCE_DEVICE=cuda
-      # - FORCE_COMPUTE_TYPE=float16
+      # Every setting has an AISRT_ variable. A command line option overrides it.
+      # - AISRT_TRANSLATE=true
+      # - AISRT_WATCH=true
+      # - AISRT_WATCH_INTERVAL_MINS=60
+      # - AISRT_FILTERS__MIN_AGE_MINS=30
+      # - AISRT_HARDWARE__FORCE_MODEL=large-v3
+      # - AISRT_HARDWARE__FORCE_DEVICE=cuda
+      # - AISRT_HARDWARE__FORCE_COMPUTE_TYPE=float16
+
     volumes:
-      # Map the target NAS media directory to /media
-      # Ensure this is mounted rw (read-write) so the tool can write SRT files.
+      # The media library. Mount it read-write so the tool can write subtitles.
       - /mnt/user/media/movies:/media:rw
-      
-      # Map the internal SQLite state database directory to a local, fast SSD.
-      # WARNING: Do NOT mount this to an NFS/SMB network share! SQLite WAL mode will corrupt.
-      - ./aisrt_data:/root/.config/aisrt:rw
-      
-    # NVIDIA Container Toolkit integration
+      # The state database. Keep it on local storage: SQLite write-ahead logging
+      # does not work over NFS or SMB, and aisrt warns when it detects that.
+      - ./aisrt_data:/config
+
     deploy:
       resources:
         reservations:
@@ -31,13 +37,15 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-              
-    # Command to run on startup. 
-    # Example: Run the live pipeline on /media, skipping files younger than 60 mins.
-    command: ["aisrt", "run", "/media", "--min-age-mins", "60"]
-    
-    # Optional: If you only want to process the queue once and exit, use 'no'.
-    # If you want it to behave like a daemon and restart, use 'unless-stopped'.
-    # NOTE: The daemon does not currently loop indefinitely on its own. It scans, processes, and exits.
-    # You could orchestrate a cronjob to start the container every night.
-    restart: "no"
+
+    # Watch mode turns the container into a daemon that rescans on an interval.
+    # Drop --watch to process the queue once and exit.
+    command: ["run", "/media", "--watch", "--watch-interval", "60", "--min-age-mins", "60"]
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

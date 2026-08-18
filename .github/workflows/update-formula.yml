@@ -5,11 +5,20 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: update-formula-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   update-formula:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -50,16 +59,21 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           SHA256="${{ steps.sha.outputs.sha256 }}"
-          sed -i "s|url \".*\"|url \"https://files.pythonhosted.org/packages/source/a/aisrt/aisrt-${VERSION}.tar.gz\"|" Formula/aisrt.rb
-          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/aisrt.rb
+          # Anchor both edits to the top-level stanza. An unanchored match would
+          # rewrite every url and sha256 line, including any resource block.
+          sed -i "0,/^  url \".*\"/s||  url \"https://files.pythonhosted.org/packages/source/a/aisrt/aisrt-${VERSION}.tar.gz\"|" Formula/aisrt.rb
+          sed -i "0,/^  sha256 \".*\"/s||  sha256 \"${SHA256}\"|" Formula/aisrt.rb
           echo "Updated Formula/aisrt.rb:"
           cat Formula/aisrt.rb
 
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/aisrt.rb
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
-          git push origin main
+      - name: Open a pull request with the updated formula
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
+          title: "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
+          body: |
+            Automated formula update for the `v${{ steps.version.outputs.version }}` release.
+          branch: chore/homebrew-v${{ steps.version.outputs.version }}
+          base: main
+          add-paths: Formula/aisrt.rb
+          delete-branch: true

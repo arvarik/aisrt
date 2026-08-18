@@ -1,57 +1,86 @@
 # syntax=docker/dockerfile:1
 
-# Base image: NVIDIA CUDA 12.2.2 with cuDNN 8 on Ubuntu 22.04
-# Required for optimal CTranslate2 backend performance on GPUs.
-# Falls back gracefully to CPU if no GPU is passed to the container.
-FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+# CUDA 12.9 with cuDNN 9. CTranslate2 4.5 and later link against cuDNN 9, so an
+# older cuDNN 8 image loads the model and then fails at inference time.
+ARG CUDA_IMAGE=nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
 
-# Prevent interactive prompts during apt installations
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
+# --------------------------------------------------------------------------
+# Builder: resolve dependencies and install the application into a virtualenv.
+# --------------------------------------------------------------------------
+FROM ${CUDA_IMAGE} AS builder
 
-# Install system dependencies:
-# - Python 3.11 & venv
-# - FFmpeg (required for audio extraction)
-# - Tini (required for PID 1 signal handling and zombie process reaping)
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        python3.11 \
-        python3.11-venv \
-        python3-pip \
-        ffmpeg \
-        tini \
-        && \
+    apt-get install -y --no-install-recommends python3 python3-venv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set up the application working directory
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
+
 WORKDIR /app
 
-# Create a virtual environment and ensure it's on the PATH
-RUN python3.11 -m venv /venv
-ENV PATH="/venv/bin:$PATH"
+# Dependencies first. This layer is rebuilt only when the lockfile changes, so
+# editing a source file no longer re-downloads CTranslate2 and onnxruntime.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev
 
-# Upgrade core Python build tools
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# Copy project definition and source code
-COPY pyproject.toml README.md ./
+# The application itself.
 COPY src/ src/
+COPY README.md LICENSE ./
+ARG VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${VERSION}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
 
-# Install the application into the virtual environment
-RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0" pip install --no-cache-dir .
+# --------------------------------------------------------------------------
+# Runtime: the CUDA runtime, FFmpeg, and the finished virtualenv.
+# --------------------------------------------------------------------------
+FROM ${CUDA_IMAGE} AS runtime
 
-# Create a directory for the SQLite state database
-# This should be mapped to a local volume to prevent DB corruption over network shares
-RUN mkdir -p /root/.config/aisrt
+LABEL org.opencontainers.image.title="aisrt" \
+      org.opencontainers.image.description="Hardware-aware pipeline for broadcast-quality subtitles" \
+      org.opencontainers.image.source="https://github.com/arvarik/aisrt" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
-# Prevent C libraries from thrashing threads, which causes GIL lockups
-ENV OMP_NUM_THREADS=1
-ENV MKL_NUM_THREADS=1
-ENV OPENBLAS_NUM_THREADS=1
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    XDG_CONFIG_HOME=/config
 
-# Use Tini to handle graceful shutdown (SIGTERM -> SIGINT translation)
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# python3 for the interpreter, ffmpeg for decoding, tini for signal forwarding
+# and zombie reaping at PID 1.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 ffmpeg tini && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Default command if none is provided in docker-compose
-CMD ["aisrt", "--help"]
+# An unprivileged user. Running as root would write root-owned .srt files onto
+# a media share that the owning user then cannot delete.
+RUN groupadd --gid 1000 aisrt && \
+    useradd --uid 1000 --gid 1000 --create-home --home-dir /home/aisrt aisrt && \
+    mkdir -p /config/aisrt /media && \
+    chown -R 1000:1000 /config /home/aisrt
+
+WORKDIR /app
+COPY --from=builder --chown=1000:1000 /app/.venv /app/.venv
+
+USER 1000:1000
+VOLUME ["/config"]
+
+# The daemon can run for days, so a health check must prove the binary still
+# loads. A wedged pipeline needs the container's own logs to diagnose.
+HEALTHCHECK --interval=5m --timeout=30s --start-period=10m --retries=3 \
+    CMD ["/app/.venv/bin/aisrt", "--version"]
+
+STOPSIGNAL SIGTERM
+
+# tini forwards SIGTERM, which the application handles by draining the queues
+# and closing the state database before it exits.
+ENTRYPOINT ["/usr/bin/tini", "--", "aisrt"]
+CMD ["--help"]

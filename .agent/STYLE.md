@@ -5,7 +5,7 @@ _This document enforces the visual identity and coding patterns of the project. 
 ## 1. Visual Language & Tokens
 - **Terminal UI (`Rich`)**: Output formatting is handled exclusively via `Rich`. NEVER use standard `print()`.
 - **Progress Bars**: Use `rich.progress` to represent FFmpeg extraction metrics and CTranslate inference batch progress. Ensure bars gracefully decay if `stdout` is piped to a file.
-- **Logging**: Use `rich.console.Console` for stylized state logs (e.g., `[green]Extracting...[/green]`).
+- **Logging**: Loguru writes to stderr. Rich owns stdout. Never drive a Rich live display from a worker thread; post the update to the event loop with `loop.call_soon_threadsafe` and let the main thread render it.
 
 ## 2. CLI Component Patterns
 - **Typer Arguments**: CLI arguments (`aisrt run`) MUST be defined via `typer.Option`. Use exact `kebab-case` for flags (e.g. `--min-age-mins`).
@@ -14,14 +14,14 @@ _This document enforces the visual identity and coding patterns of the project. 
 ## 3. Code Conventions
 ### Architecture Patterns
 - **Concurrency**: `asyncio.TaskGroup` orchestrator handles concurrent pipelines. Blocking workloads (like `faster-whisper` inference or heavy numpy transpositions) MUST be offloaded to `loop.run_in_executor()`.
-- **No Temporary Files**: Zero-disk extraction via FFmpeg streaming `stdout` directly to `bytearray` and `numpy.ndarray`. 
+- **No Temporary Files**: Zero-disk extraction. FFmpeg streams `stdout` straight into a preallocated `numpy` float32 buffer. Do not stage the bytes in a `bytearray` first.
 
 ### State Management
 - **Immediate State Tracking**: State in the SQLite DB is updated to `EXTRACTING` or `INFERENCING` immediately upon popping an item from a queue. No waiting for the full pipeline run.
-- **Memory Management**: ALWAYS explicitly delete large data objects (`job.audio_data`) and call `gc.collect()` after inference to prevent fragmentation in 24/7 daemon mode.
+- **Memory Management**: Drop the last reference to a large array as soon as the work is done. CPython frees it by reference counting immediately. Do NOT call `gc.collect()` per file: it only walks reference cycles, costs time proportional to the live heap, and stalls the event loop. Reserve and release bytes through `MemoryBudget` instead.
 
 ### Strict Typing
-- All code MUST pass `mypy src/aisrt tests --strict`.
+- All code MUST pass `uv run mypy`, which is configured for strict mode over `src/aisrt` and `tests`.
 - No `Any` types unless absolutely necessary.
 - Comprehensive type hints are required everywhere.
 - All code MUST be formatted and linted via `ruff format .` and `ruff check .`.
