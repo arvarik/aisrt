@@ -2,10 +2,17 @@ name: Publish Docker Image
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*.*.*" ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -14,15 +21,22 @@ env:
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to the Container registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -38,11 +52,44 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      # metadata-action's version output is a Docker tag, which on a branch or a
+      # pull request is something like "sha-abc123". hatch-vcs needs a PEP 440
+      # version, so derive one from the git tag and fall back to 0.0.0.
+      - name: Resolve a PEP 440 version for the build
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            case "$GITHUB_REF_NAME" in
+              v[0-9]*) echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT" ;;
+              *)       echo "value=0.0.0" >> "$GITHUB_OUTPUT" ;;
+            esac
+          else
+            echo "value=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+          # Without a cache every run rebuilds the whole CUDA layer stack.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest the image provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

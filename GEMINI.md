@@ -8,14 +8,14 @@ Your code must be **Open Source Enterprise Grade**.
 
 1. **Zero-Disk Extraction (No SSD Wear):**
    - NEVER write `.wav`, `.mp4`, or `.ts` temp files to disk.
-   - ALWAYS stream `ffmpeg` via `stdout` (`-f s16le -`) dynamically into a `bytearray` and convert to `numpy.ndarray`.
+   - ALWAYS stream `ffmpeg` via `stdout` (`-f s16le -`) straight into a preallocated `numpy` float32 buffer sized from the probed duration. Do not stage the bytes in a `bytearray` and then call `.astype()`.
    - If you modify `AudioExtractor`, ensure memory streams are not blocked by arbitrary `.communicate()` limits.
 
 2. **Asynchronous Memory Safety (OOM Protection):**
    - NEVER uncap the `asyncio.Queue` bounds.
    - Extraction queue `maxsize` is strictly capped at `3` to prevent the CPU from flooding RAM with idle audio buffers while waiting for the GPU.
    - Inference queue `maxsize` is strictly capped at `2`.
-   - ALWAYS explicitly delete `job.audio_data` and invoke `gc.collect()` after inference to prevent memory fragmentation during 24/7 watch loops.
+   - Drop the last reference to `job.audio_data` when the work is done, and release its bytes back to `MemoryBudget`. Do NOT call `gc.collect()` per file: reference counting already frees the array, and a full collection stalls the event loop.
 
 3. **Event Loop Starvation (GIL Deadlocks):**
    - NEVER execute `faster-whisper` inference or blocking CTranslate2 operations inside the main `asyncio` event loop.

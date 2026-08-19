@@ -8,7 +8,7 @@ Your code must be **Open Source Enterprise Grade**.
 
 1. **Zero-Disk Extraction (No SSD Wear):**
    - NEVER write `.wav` or `.mp4` temp files to disk.
-   - ALWAYS stream `ffmpeg` via `stdout` (`-f s16le -`) dynamically into a `bytearray` and convert to `numpy.ndarray`.
+   - ALWAYS stream `ffmpeg` via `stdout` (`-f s16le -`) straight into a preallocated `numpy` float32 buffer sized from the probed duration. Do not stage the bytes in a `bytearray` and then call `.astype()`.
    - If you modify `AudioExtractor`, ensure memory streams are not blocked by arbitrary `.communicate()` limits.
 
 2. **Asynchronous Memory Safety (OOM Protection):**

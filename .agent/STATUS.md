@@ -1,16 +1,17 @@
 # aisrt Status
-[STATE: INITIALIZED]
+[STATE: HARDENED]
 
-Last updated: 2026-04-14
+Last updated: 2026-08-18
 
 _This file tracks the detailed explore/plan/build/test sub-phases per feature. It is the single source of truth for "where am I?" Agents should update this file after completing tasks or making progress._
 
 ## Current Focus
-Project Bootstrapped. Ready for feature ideation.
+Comprehensive correctness, performance, robustness, and open-source review applied
+across every module. See `CHANGELOG.md` under `Unreleased` for the full list.
 
 ## Current Milestone Tracking
-- **Target**: Initial Daemon Stabilization / MPS Support Tuning
-- **Progress**: Awaiting final pipeline benchmarking tests.
+- **Target**: Correctness, performance, and open-source hardening
+- **Progress**: Complete. Lint, strict types, 319 tests, and an 85 percent coverage floor all pass.
 
 ## State of Work
 - [ ] Ideate: `docs/explorations/YYYY-MM-DD-{topic}.md`
@@ -23,16 +24,29 @@ Project Bootstrapped. Ready for feature ideation.
 
 ## Recently Completed
 - [Project Bootstrapped] (shipped 2026-04-14)
+- [Comprehensive hardening review] (2026-08-18)
+  - Subtitle formatter rewritten to the Netflix Timed Text Style Guide.
+  - Audio extraction rewritten onto a preallocated buffer, cutting peak memory by a third.
+  - Discovery made streaming, iterative, and case-insensitive for exclude patterns.
+  - State migrations made non-destructive.
+  - Signal handling, exit codes, and byte-denominated memory bounds added.
+  - Environment variables made functional, and the README verified against the code by a test.
 
 ## Known Issues
-- (None currently)
+- `Formula/aisrt.rb` cannot install as written. Homebrew builds are network sandboxed and
+  the formula declares no `resource` blocks. Either generate them with
+  `brew update-python-resources` or retire the formula in favour of
+  `uv tool install aisrt`.
 
 ## Blockers & Upstream Dependencies
 - **Upstream Libraries**: Keep track if `faster-whisper` or `CTranslate2` releases break VRAM calculation heuristics.
 - N/A — no active blockers.
 
 ## What's Next
-Ready for first feature ideation.
+- Decide the Homebrew question above.
+- Consider a second inference backend for Apple Silicon GPUs, which CTranslate2 cannot
+  reach. `whisper.cpp` with Metal or `mlx-whisper` are the candidates. This is a backend,
+  not a flag.
 
 ## Relevant Files for Current Task
 - (none)

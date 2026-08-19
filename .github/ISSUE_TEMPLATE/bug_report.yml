@@ -1,0 +1,86 @@
+name: Bug report
+description: Report something that does not work.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please run the failing command again with `--verbose` and paste the output below.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Verbose output
+      description: The output of the command with `--verbose`.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: aisrt version
+      description: The output of `aisrt --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example "Ubuntu 24.04", "TrueNAS SCALE 24.10", or "macOS 15.3".
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: CPU, GPU model, and VRAM. Say "CPU only" if you have no GPU.
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Resolved model and device
+      description: The "Routed to Model" line that aisrt prints at startup.
+    validations:
+      required: true
+
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: FFmpeg version
+      description: The first line of `ffmpeg -version`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install aisrt?
+      options:
+        - pipx or uv tool
+        - pip
+        - Docker
+        - From source
+    validations:
+      required: true

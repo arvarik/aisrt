@@ -1,154 +1,280 @@
-"""NAS-Safe File Discovery Engine."""
+"""NAS-safe media discovery."""
+
+from __future__ import annotations
 
 import asyncio
+import fnmatch
 import os
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, Final
 
 from loguru import logger
 
 from aisrt.config import FilterConfig
-from aisrt.probing import has_embedded_subtitles, has_external_subtitle
-from aisrt.state import StateTracker
+from aisrt.probing import MediaInfo, external_subtitle_path, normalize_languages, probe_media
+from aisrt.state import (
+    STATUS_EMBEDDED_EXISTS,
+    STATUS_FAILED,
+    SkipRecord,
+    StateTracker,
+    build_row,
+)
 
-if TYPE_CHECKING:
-    from aisrt.state import FileState
+ACTION_PROCESS: Final = "PROCESS"
+"""The action string that means the file needs a subtitle."""
+
+_BATCH_SIZE: Final = 256
+_STATE_FLUSH_SIZE: Final = 200
+MAX_ATTEMPTS: Final = 3
+"""How many times a failing file is retried across runs before it is left alone."""
 
 
-@dataclass
+@dataclass(slots=True)
 class MediaFile:
-    """Represents a discovered media file pending processing."""
+    """A media file found on disk."""
 
     path: Path
     size: int
     mtime: float
     inode: int
+    device: int = 0
+    media_info: MediaInfo | None = None
+    external_subtitle: Path | None = None
+
+    @property
+    def duration(self) -> float | None:
+        """The probed duration in seconds, or None when it is unknown."""
+        return self.media_info.duration if self.media_info else None
+
+
+def iter_media_files(
+    root: Path,
+    extensions: frozenset[str],
+    exclude_patterns: tuple[str, ...],
+    follow_symlinks: bool = False,
+) -> Iterator[MediaFile]:
+    """Walk a directory tree and yield media files as they are found.
+
+    The walk uses an explicit stack, so a deep tree cannot exhaust the recursion
+    limit. It costs one ``lstat`` per media file and none for anything else. A
+    failure on one entry or one directory never stops the walk.
+
+    Args:
+        root: The directory to crawl.
+        extensions: Lowercase extensions to accept, each with a leading dot.
+        exclude_patterns: Lowercase glob patterns. A match on any path component
+            skips that file, or prunes that whole subtree.
+        follow_symlinks: If True, descend into symlinked directories. Loops are
+            detected by device and inode.
+
+    Yields:
+        One MediaFile per accepted file.
+    """
+    stack: list[str] = [str(root)]
+    visited: set[tuple[int, int]] = set()
+
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    name = entry.name.lower()
+                    if name.startswith("."):
+                        continue
+                    if any(fnmatch.fnmatch(name, pattern) for pattern in exclude_patterns):
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=follow_symlinks):
+                            if follow_symlinks:
+                                stat = entry.stat()
+                                key = (stat.st_dev, stat.st_ino)
+                                if key in visited:
+                                    continue
+                                visited.add(key)
+                            stack.append(entry.path)
+                        elif os.path.splitext(name)[1] in extensions and entry.is_file():
+                            # is_file() follows the link and rejects a FIFO, a
+                            # socket, and a broken symlink. stat() then describes
+                            # the target, so size and inode identify real content.
+                            stat = entry.stat()
+                            yield MediaFile(
+                                path=Path(entry.path),
+                                size=stat.st_size,
+                                mtime=stat.st_mtime,
+                                inode=stat.st_ino,
+                                device=stat.st_dev,
+                            )
+                    except OSError as error:
+                        logger.debug(f"Skipping {entry.path}: {error}")
+        except OSError as error:
+            logger.warning(f"Cannot read directory {current}: {error}")
 
 
 class DiscoveryEngine:
-    """Safely crawls a media directory and filters files based on state and config."""
+    """Crawls a media directory and decides what each file needs."""
 
-    def __init__(self, media_dir: Path, config: FilterConfig, state_tracker: StateTracker) -> None:
-        """Initialize the discovery engine.
+    def __init__(
+        self,
+        media_dir: Path,
+        config: FilterConfig,
+        state_tracker: StateTracker,
+        probe_concurrency: int = 4,
+    ) -> None:
+        """Initialize the engine.
 
         Args:
-            media_dir: The root directory to scan.
-            config: The filtering configuration rules.
-            state_tracker: The active SQLite state tracker.
+            media_dir: The directory to crawl.
+            config: The filtering rules.
+            state_tracker: The open state database.
+            probe_concurrency: How many ffprobe calls may run at once.
         """
         self.media_dir = media_dir
         self.config = config
         self.state_tracker = state_tracker
+        self.target_languages = normalize_languages(config.target_languages)
+        self.extensions = frozenset(config.extensions)
+        self.exclude_patterns = tuple(config.exclude_patterns)
+        self.probe_concurrency = max(1, probe_concurrency)
+        self._probe_semaphore = asyncio.Semaphore(self.probe_concurrency)
+        # The pools are created per scan, so one engine can be scanned again.
+        self._crawl_pool: ThreadPoolExecutor | None = None
+        self._stat_pool: ThreadPoolExecutor | None = None
 
     async def scan(self) -> AsyncGenerator[tuple[MediaFile, str], None]:
-        """Scan the media directory and yield files with their action status.
+        """Crawl the directory and report what to do with each file.
+
+        Files stream out as the crawl finds them, so the pipeline starts working
+        before the crawl finishes. Probing runs concurrently, bounded by the
+        semaphore, which is what makes a large library scan quickly.
 
         Yields:
-            A tuple of (MediaFile, action_string).
-            action_string is 'PROCESS' if the file needs STT, or a 'SKIP: <reason>' string.
+            A tuple of the file and an action string. The action is ``PROCESS``
+            or a string that starts with ``SKIP: ``.
         """
+        logger.info(f"Scanning {self.media_dir}")
+        # The walk drives one generator, so it needs a single thread. The sidecar
+        # checks get their own pool, so a batch of stat calls cannot hold the
+        # crawl back.
+        self._crawl_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aisrt-crawl")
+        self._stat_pool = ThreadPoolExecutor(
+            max_workers=self.probe_concurrency, thread_name_prefix="aisrt-stat"
+        )
+        skip_records = await self.state_tracker.get_skip_records(str(self.media_dir))
+        processed_identities = await self.state_tracker.get_all_processed_hardlinks()
+        now = time.time()
+
+        walker = iter_media_files(
+            self.media_dir, self.extensions, self.exclude_patterns, self.config.follow_symlinks
+        )
         loop = asyncio.get_running_loop()
+        found = 0
+        pending_rows: list[dict[str, Any]] = []
 
-        def _walk(directory: Path) -> list[MediaFile]:
-            files = []
-            try:
-                for entry in os.scandir(directory):
-                    path = Path(entry.path)
+        try:
+            while True:
+                batch = await loop.run_in_executor(
+                    self._crawl_pool, _take_batch, walker, _BATCH_SIZE
+                )
+                if not batch:
+                    break
+                found += len(batch)
 
-                    if any(path.match(p) for p in self.config.exclude_patterns):
-                        continue
-
-                    if entry.is_dir(follow_symlinks=False):
-                        files.extend(_walk(path))
-                    elif (
-                        entry.is_file(follow_symlinks=False)
-                        and path.suffix.lower() in self.config.extensions
-                    ):
-                        try:
-                            stat = entry.stat(follow_symlinks=False)
-                            files.append(
-                                MediaFile(
-                                    path=path,
-                                    size=stat.st_size,
-                                    mtime=stat.st_mtime,
-                                    inode=stat.st_ino,
-                                )
+                results = await asyncio.gather(
+                    *(
+                        self._analyze_file(media_file, now, skip_records, processed_identities)
+                        for media_file in batch
+                    )
+                )
+                for media_file, action in results:
+                    if action.startswith("SKIP: Embedded"):
+                        pending_rows.append(
+                            build_row(
+                                str(media_file.path),
+                                media_file.inode,
+                                media_file.device,
+                                media_file.mtime,
+                                media_file.size,
+                                STATUS_EMBEDDED_EXISTS,
                             )
-                        except OSError:
-                            pass
-            except PermissionError:
-                logger.warning(f"Permission denied: {directory}")
-            return files
-
-        logger.info(f"Starting directory scan at {self.media_dir}...")
-        all_files = await loop.run_in_executor(None, _walk, self.media_dir)
-        logger.info(f"Found {len(all_files)} potential media files. Analyzing...")
-
-        current_time = time.time()
-
-        # Pre-fetch all states and processed hardlinks to avoid N+1 database queries
-        all_states = await self.state_tracker.get_all_states()
-        processed_hardlinks = await self.state_tracker.get_all_processed_hardlinks()
-
-        for media_file in all_files:
-            action_str = await self._analyze_file(
-                media_file, current_time, all_states, processed_hardlinks
-            )
-            yield media_file, action_str
+                        )
+                        processed_identities.add(
+                            (media_file.device, media_file.inode, media_file.size)
+                        )
+                    if len(pending_rows) >= _STATE_FLUSH_SIZE:
+                        await self.state_tracker.update_states(pending_rows)
+                        pending_rows.clear()
+                    yield media_file, action
+        finally:
+            if pending_rows:
+                await self.state_tracker.update_states(pending_rows)
+            self._crawl_pool.shutdown(wait=False)
+            self._stat_pool.shutdown(wait=False)
+            self._crawl_pool = None
+            self._stat_pool = None
+            logger.info(f"Scan finished. {found} media file(s) examined.")
 
     async def _analyze_file(
         self,
         media_file: MediaFile,
-        current_time: float,
-        all_states: dict[str, "FileState"] | None = None,
-        processed_hardlinks: set[tuple[int, int]] | None = None,
-    ) -> str:
-        """Determine if a single file should be processed or skipped."""
-        min_age_seconds = self.config.min_age_mins * 60
+        now: float,
+        skip_records: dict[str, SkipRecord],
+        processed_identities: set[tuple[int, int, int]],
+    ) -> tuple[MediaFile, str]:
+        """Decide what one file needs.
 
-        if (current_time - media_file.mtime) < min_age_seconds:
-            return f"SKIP: Modified recently (< {self.config.min_age_mins}m)"
+        Args:
+            media_file: The file to inspect.
+            now: The time the scan started, in seconds since the epoch.
+            skip_records: The state rows loaded once for the whole scan.
+            processed_identities: Content identities already finished.
 
-        if has_external_subtitle(media_file.path, self.config.target_languages):
-            return "SKIP: External sibling subtitle exists"
+        Returns:
+            The file and its action string.
+        """
+        age_seconds = now - media_file.mtime
+        if age_seconds < self.config.min_age_mins * 60:
+            return media_file, f"SKIP: Modified recently (< {self.config.min_age_mins}m)"
 
-        # Check pre-fetched states or fallback to individual query
-        if all_states is not None:
-            db_state = all_states.get(str(media_file.path))
-        else:
-            db_state = await self.state_tracker.get_state(str(media_file.path))
+        loop = asyncio.get_running_loop()
+        sidecar = await loop.run_in_executor(
+            self._stat_pool, external_subtitle_path, media_file.path, self.target_languages
+        )
+        if sidecar is not None:
+            media_file.external_subtitle = sidecar
+            return media_file, "SKIP: External sibling subtitle exists"
 
-        if db_state and db_state.status == "COMPLETED" and db_state.size == media_file.size:
-            return "SKIP: Already processed (Database)"
+        record = skip_records.get(str(media_file.path))
+        if record is not None:
+            if record.status in {"COMPLETED", "NO_SPEECH"} and record.size == media_file.size:
+                return media_file, "SKIP: Already processed (database)"
+            if record.status == STATUS_EMBEDDED_EXISTS and record.size == media_file.size:
+                return media_file, "SKIP: Embedded subtitle recorded (database)"
+            if record.status == STATUS_FAILED and record.attempts >= MAX_ATTEMPTS:
+                return media_file, f"SKIP: Failed {record.attempts} times"
 
-        # Check pre-fetched hardlinks or fallback to individual query
-        if processed_hardlinks is not None:
-            is_hardlink = (media_file.inode, media_file.size) in processed_hardlinks
-        else:
-            is_hardlink = await self.state_tracker.check_hardlink_processed(
-                media_file.inode, media_file.size
-            )
+        identity = (media_file.device, media_file.inode, media_file.size)
+        if identity in processed_identities:
+            return media_file, "SKIP: Hardlink to an already processed file"
 
-        if is_hardlink:
-            return "SKIP: Hardlink to already processed file"
+        async with self._probe_semaphore:
+            media_file.media_info = await probe_media(media_file.path)
 
-        if db_state and db_state.status == "EMBEDDED_EXISTS":
-            return "SKIP: Embedded English subtitle exists (Database)"
+        info = media_file.media_info
+        if info.probe_failed:
+            return media_file, "SKIP: Cannot read the media file"
+        if not info.audio_tracks:
+            return media_file, "SKIP: No audio track"
+        if info.has_text_subtitle(self.target_languages):
+            return media_file, "SKIP: Embedded subtitle detected"
 
-        has_embedded = await has_embedded_subtitles(media_file.path, self.config.target_languages)
-        if has_embedded:
-            await self.state_tracker.update_state(
-                file_path=str(media_file.path),
-                inode=media_file.inode,
-                mtime=media_file.mtime,
-                size=media_file.size,
-                status="EMBEDDED_EXISTS",
-            )
-            if processed_hardlinks is not None:
-                processed_hardlinks.add((media_file.inode, media_file.size))
-            return "SKIP: Embedded English subtitle detected"
+        return media_file, ACTION_PROCESS
 
-        return "PROCESS"
+
+def _take_batch(iterator: Iterator[MediaFile], size: int) -> list[MediaFile]:
+    """Pull up to ``size`` items from an iterator. Runs on the crawl thread."""
+    return list(islice(iterator, size))
