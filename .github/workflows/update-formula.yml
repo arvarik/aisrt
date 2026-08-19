@@ -21,7 +21,7 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 
@@ -67,7 +67,7 @@ jobs:
           cat Formula/aisrt.rb
 
       - name: Open a pull request with the updated formula
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
           title: "chore: update Homebrew formula to v${{ steps.version.outputs.version }}"
