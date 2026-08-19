@@ -55,6 +55,21 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
 
+      # metadata-action's version output is a Docker tag, which on a branch or a
+      # pull request is something like "sha-abc123". hatch-vcs needs a PEP 440
+      # version, so derive one from the git tag and fall back to 0.0.0.
+      - name: Resolve a PEP 440 version for the build
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            case "$GITHUB_REF_NAME" in
+              v[0-9]*) echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT" ;;
+              *)       echo "value=0.0.0" >> "$GITHUB_OUTPUT" ;;
+            esac
+          else
+            echo "value=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
@@ -64,7 +79,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.version.outputs.value }}
           # Without a cache every run rebuilds the whole CUDA layer stack.
           cache-from: type=gha
           cache-to: type=gha,mode=max

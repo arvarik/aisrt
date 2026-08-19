@@ -62,7 +62,10 @@ RUN apt-get update && \
 
 # An unprivileged user. Running as root would write root-owned .srt files onto
 # a media share that the owning user then cannot delete.
-RUN groupadd --gid 1000 aisrt && \
+# Ubuntu 24.04 ships a default "ubuntu" account on UID 1000. Remove it first so
+# the identity inside the image is ours and is predictable.
+RUN userdel --remove ubuntu 2>/dev/null || true; \
+    groupadd --gid 1000 aisrt && \
     useradd --uid 1000 --gid 1000 --create-home --home-dir /home/aisrt aisrt && \
     mkdir -p /config/aisrt /media && \
     chown -R 1000:1000 /config /home/aisrt
