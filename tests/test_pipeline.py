@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +12,13 @@ import pytest
 
 from aisrt.config import FilterConfig
 from aisrt.discovery import ACTION_PROCESS, DiscoveryEngine, MediaFile
-from aisrt.pipeline import InferenceJob, MemoryBudget, Pipeline, PipelineStats
+from aisrt.pipeline import (
+    InferenceJob,
+    MemoryBudget,
+    Pipeline,
+    PipelineStats,
+    ProgressReporter,
+)
 from aisrt.probing import AudioTrack, MediaInfo
 from aisrt.state import (
     STATUS_COMPLETED,
@@ -126,14 +132,20 @@ class TestMemoryBudget:
 
     @pytest.mark.asyncio
     async def test_every_worker_underestimating_does_not_deadlock(self) -> None:
-        """Three workers that each need a little more than they reserved finish."""
-        budget = MemoryBudget(300)
+        """Three workers that each need a little more than they reserved finish.
+
+        Each holds a third of the budget, so re-acquiring the shortfall would make
+        all three wait on room they are themselves occupying.
+        """
+        limit = 300 * 1024 * 1024
+        budget = MemoryBudget(limit)
 
         async def worker() -> None:
-            await budget.acquire(100)
+            share = limit // 3
+            await budget.acquire(share)
             await asyncio.sleep(0)
-            await budget.adjust(20)
-            await budget.release(120)
+            await budget.adjust(20 * 1024 * 1024)
+            await budget.release(share + 20 * 1024 * 1024)
 
         await asyncio.wait_for(asyncio.gather(*(worker() for _ in range(3))), timeout=2.0)
         assert budget._used == 0
@@ -385,6 +397,101 @@ class TestAudioTrackChoice:
         """A translate run must not select the English track and translate nothing."""
         pipeline = Pipeline(engine, stt, translate=True)
         assert pipeline.preferred_audio == frozenset()
+
+
+class TestProgressReporting:
+    """Progress must cross from the model thread to the event loop."""
+
+    @pytest.mark.asyncio
+    async def test_inference_reports_progress(
+        self, engine: DiscoveryEngine, stt: MagicMock
+    ) -> None:
+        """Each finished segment advances the reporter the display reads."""
+
+        def transcribe(
+            audio: np.ndarray,
+            translate: bool,
+            language: str | None,
+            on_progress: Callable[[float], None] | None = None,
+        ) -> tuple[object, float]:
+            def segments() -> object:
+                for end in (1.0, 2.0, 3.0):
+                    if on_progress is not None:
+                        on_progress(end)
+                    yield MagicMock(words=None, text="hi", start=end - 1, end=end)
+
+            return segments(), 3.0
+
+        stt.transcribe = transcribe
+        reporter = ProgressReporter()
+        pipeline = Pipeline(engine, stt, progress=reporter)
+        job = InferenceJob(media_file("a.mkv"), np.zeros(16000, dtype=np.float32))
+
+        reporter.start("a.mkv", 3.0)
+        _srt, duration = pipeline._run_inference(job, asyncio.get_running_loop())
+        await asyncio.sleep(0)
+
+        assert duration == 3.0
+        assert reporter.completed_seconds == 3.0, "the display would sit at zero percent"
+
+    def test_finish_clears_the_current_file(self) -> None:
+        """Between files the display must not keep showing the last name."""
+        reporter = ProgressReporter()
+        reporter.start("a.mkv", 10.0)
+        reporter.advance(4.0)
+        reporter.finish()
+        assert reporter.current_file == ""
+        assert reporter.completed_seconds == 0.0
+
+    @pytest.mark.asyncio
+    async def test_a_detected_language_is_pinned(
+        self, engine: DiscoveryEngine, stt: MagicMock
+    ) -> None:
+        """Detecting once and pinning stops per-window re-detection."""
+        captured: dict[str, object] = {}
+
+        def transcribe(
+            audio: np.ndarray,
+            translate: bool,
+            language: str | None,
+            on_progress: Callable[[float], None] | None = None,
+        ) -> tuple[object, float]:
+            captured["language"] = language
+            return iter([]), 1.0
+
+        stt.transcribe = transcribe
+        stt.detect_language.return_value = ("ja", 0.97)
+        pipeline = Pipeline(engine, stt)
+        job = InferenceJob(media_file("a.mkv"), np.zeros(16000, dtype=np.float32))
+
+        pipeline._run_inference(job, asyncio.get_running_loop())
+
+        assert captured["language"] == "ja"
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_detection_is_not_pinned(
+        self, engine: DiscoveryEngine, stt: MagicMock
+    ) -> None:
+        """An unsure guess is better left to the model, per window."""
+        captured: dict[str, object] = {}
+
+        def transcribe(
+            audio: np.ndarray,
+            translate: bool,
+            language: str | None,
+            on_progress: Callable[[float], None] | None = None,
+        ) -> tuple[object, float]:
+            captured["language"] = language
+            return iter([]), 1.0
+
+        stt.transcribe = transcribe
+        stt.detect_language.return_value = ("ja", 0.2)
+        pipeline = Pipeline(engine, stt)
+        job = InferenceJob(media_file("a.mkv"), np.zeros(16000, dtype=np.float32))
+
+        pipeline._run_inference(job, asyncio.get_running_loop())
+
+        assert captured["language"] is None
 
 
 class TestInferenceJob:

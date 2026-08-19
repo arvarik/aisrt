@@ -177,6 +177,111 @@ class TestSRTFormatterCompliance:
             assert len(lines) >= 3
 
 
+class TestDegenerateInput:
+    """Impossible input must degrade gracefully, never crash or lose text.
+
+    Some limits cannot always be met. Speech delivered at 30 characters per
+    second cannot be shown at 20 without overlapping cues, and a single token
+    longer than one cue cannot be broken. In those cases the formatter does the
+    best it can. These invariants hold regardless.
+    """
+
+    @staticmethod
+    def _cues(words: list[FakeWord]) -> list[Cue]:
+        return SRTFormatter().build_cues([FakeSegment("", words[0].start, words[-1].end, words)])
+
+    @staticmethod
+    def _timed(tokens: list[str], start: float, step: float) -> list[FakeWord]:
+        """Lay tokens out at a fixed rate."""
+        return [
+            FakeWord(token, start + index * step, start + index * step + step)
+            for index, token in enumerate(tokens)
+        ]
+
+    @staticmethod
+    def _assert_invariants(cues: list[Cue], words: list[FakeWord]) -> None:
+        """No text is lost or altered, and no cue overlaps its neighbour."""
+        rendered = " ".join(cue.text.replace("\n", " ") for cue in cues).split()
+        assert rendered == [w.word for w in words], "the formatter changed the transcript"
+        previous: Cue | None = None
+        for index, cue in enumerate(cues, start=1):
+            assert cue.start >= 0.0, f"cue {index} starts before zero"
+            assert cue.end > cue.start, f"cue {index} has no duration"
+            if previous is not None:
+                assert cue.start >= previous.end, f"cue {index} overlaps its predecessor"
+            previous = cue
+
+    def test_a_token_longer_than_one_cue(self) -> None:
+        """An unbreakable token must not swallow the rest of the sentence."""
+        tail = ["the", "rest", "of", "this", "sentence", "keeps", "going", "for", "a", "while"]
+        words = [FakeWord("A" * 120, 0.0, 0.3), *self._timed(tail, 0.3, 0.3)]
+
+        cues = self._cues(words)
+
+        assert len(cues) > 1, "one oversized token collapsed the whole sentence into one cue"
+        self._assert_invariants(cues, words)
+
+    def test_a_single_enormous_token(self) -> None:
+        """A 300-character token still produces exactly one usable cue."""
+        words = [FakeWord("B" * 300, 0.0, 4.0)]
+        cues = self._cues(words)
+        assert len(cues) == 1
+        self._assert_invariants(cues, words)
+
+    def test_speech_too_fast_to_meet_the_reading_speed(self) -> None:
+        """Unreachable reading speed must not break ordering or lose words."""
+        tokens = ["Something", "quite", "long", "is", "said", "now.", "Then", "more", "follow."]
+        words = self._timed(tokens, 10.0, 0.16)
+
+        cues = self._cues(words)
+        self._assert_invariants(cues, words)
+
+    def test_a_long_passage_with_no_punctuation(self) -> None:
+        """Without a sentence to break on, the length limits still apply."""
+        words = self._timed([f"word{index}" for index in range(400)], 0.0, 0.35)
+        cues = self._cues(words)
+
+        assert len(cues) > 20, "the passage was not split"
+        self._assert_invariants(cues, words)
+        style = SRTFormatter().style
+        for cue in cues:
+            assert len(cue.text.split("\n")) <= style.max_lines
+            assert cue.duration <= style.max_duration + 1e-6
+
+    def test_out_of_order_and_negative_timings(self) -> None:
+        """Times that move backwards are repaired rather than propagated."""
+        words = [FakeWord("a", 5.0, 5.0), FakeWord("b", 1.0, 1.0), FakeWord("c", -3.0, -2.0)]
+        cues = self._cues(words)
+        self._assert_invariants(cues, words)
+
+
+class TestLeadIn:
+    """A subtitle must not appear before the words are spoken."""
+
+    def test_a_cue_never_starts_far_before_its_first_word(self) -> None:
+        """Stretching a cue backwards is bounded by the lead-in allowance."""
+        tokens = ["Something", "quite", "long", "is", "said", "now.", "Then", "more", "follow."]
+        words = [FakeWord(t, 10.0 + i * 0.16, 10.16 + i * 0.16) for i, t in enumerate(tokens)]
+
+        formatter = SRTFormatter()
+        cues = formatter.build_cues([FakeSegment("", 10.0, words[-1].end, words)])
+
+        lead = words[0].start - cues[0].start
+        assert lead <= formatter.style.lead_in + 1e-6, (
+            f"the first cue appears {lead:.3f}s before the word is spoken"
+        )
+
+    def test_a_cue_never_exceeds_the_maximum_duration(self) -> None:
+        """Closing a gap must not push a cue past the seven second ceiling."""
+        words = [FakeWord(f"w{i}", i * 0.9, i * 0.9 + 0.4) for i in range(30)]
+        formatter = SRTFormatter()
+        cues = formatter.build_cues([FakeSegment("", 0.0, 30 * 0.9, words)])
+        for index, cue in enumerate(cues, start=1):
+            assert cue.duration <= formatter.style.max_duration + 1e-6, (
+                f"cue {index} runs {cue.duration:.3f}s"
+            )
+
+
 class TestSidecarPath:
     """The sidecar name must match what Plex and Jellyfin look for."""
 
@@ -247,16 +352,57 @@ class TestAtomicWriter:
             final = AtomicWriter.write_srt(video, "1\n00:00:00,000 --> 00:00:01,000\nHi.\n", "en")
         assert final.exists()
 
-    def test_a_write_failure_cleans_up(self, tmp_path: Path) -> None:
-        """A failed rename removes the temporary file and reports the failure."""
+    def test_a_failed_rename_cleans_up(self, tmp_path: Path) -> None:
+        """A failed commit removes the temporary file and says so."""
         video = tmp_path / "movie.mkv"
         video.write_text("video")
         with (
             patch("os.chown"),
             patch("os.replace", side_effect=OSError(28, "No space left on device")),
+            pytest.raises(RuntimeError, match="Could not commit the subtitle"),
+        ):
+            AtomicWriter.write_srt(video, "content", "en")
+        assert not list(tmp_path.glob("*.tmp"))
+        assert not (tmp_path / "movie.en.srt").exists()
+
+    def test_a_failed_write_cleans_up(self, tmp_path: Path) -> None:
+        """A failure before the commit is reported as a write failure."""
+        video = tmp_path / "movie.mkv"
+        video.write_text("video")
+        with (
+            patch("os.chown"),
+            patch("aisrt.assembly._write_all", side_effect=OSError(28, "No space left")),
             pytest.raises(RuntimeError, match="Atomic subtitle write failed"),
         ):
             AtomicWriter.write_srt(video, "content", "en")
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_a_short_write_is_completed(self, tmp_path: Path) -> None:
+        """os.write may accept only part of the buffer, so every byte is retried."""
+        video = tmp_path / "movie.mkv"
+        video.write_text("video")
+        content = "1\n00:00:00,000 --> 00:00:01,000\n" + ("x" * 5000) + "\n"
+        real_write = os.write
+
+        def short_write(fd: int, payload: bytes) -> int:
+            """Accept at most 16 bytes per call, as a slow pipe would."""
+            return real_write(fd, payload[:16])
+
+        with patch("os.chown"), patch("aisrt.assembly.os.write", side_effect=short_write):
+            final = AtomicWriter.write_srt(video, content, "en")
+
+        assert final.read_text(encoding="utf-8") == content
+
+    def test_a_very_long_filename_still_writes(self, tmp_path: Path) -> None:
+        """The temporary name must fit the filesystem limit, uuid included."""
+        stem = "A" * 230
+        video = tmp_path / f"{stem}.mkv"
+        video.write_text("video")
+
+        with patch("os.chown"):
+            final = AtomicWriter.write_srt(video, "content", "en")
+
+        assert final.exists()
         assert not list(tmp_path.glob("*.tmp"))
 
     def test_overwrites_an_existing_subtitle(self, tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ from aisrt.extractor import (
     AudioExtractor,
     _drain_pcm,
     _initial_capacity,
+    resident_bytes,
 )
 from tests.conftest import ffmpeg_installed
 
@@ -107,6 +108,33 @@ class TestDrainPcm:
         """No output means no samples, not an exception."""
         audio = await _drain_pcm(as_reader(FakeStream([])), duration=1.0)
         assert audio.size == 0
+
+
+class TestResidentBytes:
+    """The memory budget must count the whole allocation, not the visible slice."""
+
+    def test_a_view_reports_its_base(self) -> None:
+        """A slice keeps the entire buffer alive, so it must report the buffer."""
+        buffer = np.empty(1000, dtype=np.float32)
+        view = buffer[:100]
+
+        assert view.nbytes == 400
+        assert resident_bytes(view) == buffer.nbytes == 4000
+
+    def test_a_standalone_array_reports_itself(self) -> None:
+        """An array that owns its memory reports its own size."""
+        array = np.empty(100, dtype=np.float32)
+        assert resident_bytes(array) == array.nbytes == 400
+
+    @pytest.mark.asyncio
+    async def test_the_drained_array_is_a_view(self) -> None:
+        """Copying would briefly hold both arrays and raise peak memory by half."""
+        samples = np.arange(0, 1000, dtype=np.int16)
+        audio = await _drain_pcm(as_reader(FakeStream([samples.tobytes()])), duration=60.0)
+
+        assert audio.size == samples.size
+        assert audio.base is not None, "the result was copied instead of sliced"
+        assert resident_bytes(audio) > audio.nbytes
 
 
 class TestExtractCommand:

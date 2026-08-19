@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 
 from aisrt.cli import app
 from aisrt.config import AppConfig
+from tests.conftest import strip_ansi
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
@@ -23,8 +24,8 @@ runner = CliRunner()
 
 
 def _flatten(text: str) -> str:
-    """Strip the whitespace and box drawing that Rich wraps help output in."""
-    return re.sub(r"[\s│]+", "", text)
+    """Strip the colour, whitespace, and box drawing Rich wraps help output in."""
+    return re.sub(r"[\s│]+", "", strip_ansi(text))
 
 
 def _help(*args: str) -> str:

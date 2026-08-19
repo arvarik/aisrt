@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import closing
@@ -159,6 +160,15 @@ class TestSkipRecords:
         assert set(records) == {"/media/movies/a.mkv"}
 
     @pytest.mark.asyncio
+    async def test_a_sibling_directory_is_not_matched(self, tracker: StateTracker) -> None:
+        """Scanning /media/movies must not load rows for /media/movies2."""
+        await tracker.update_state("/media/movies/a.mkv", 1, 1.0, 10, STATUS_COMPLETED)
+        await tracker.update_state("/media/movies2/b.mkv", 2, 1.0, 20, STATUS_COMPLETED)
+
+        records = await tracker.get_skip_records("/media/movies")
+        assert set(records) == {"/media/movies/a.mkv"}
+
+    @pytest.mark.asyncio
     async def test_wildcards_in_a_path_are_escaped(self, tracker: StateTracker) -> None:
         """A directory named with a percent sign must not act as a wildcard."""
         await tracker.update_state("/media/100%/a.mkv", 1, 1.0, 10, STATUS_COMPLETED)
@@ -173,6 +183,70 @@ class TestSkipRecords:
         await tracker.update_state("/m/a.mkv", 1, 1.0, 10, STATUS_FAILED, attempts=3)
         records = await tracker.get_skip_records()
         assert records["/m/a.mkv"].attempts == 3
+
+
+class TestAttemptCounting:
+    """The retry budget only works if progress does not reset it."""
+
+    @pytest.mark.asyncio
+    async def test_progress_does_not_reset_the_count(self, tracker: StateTracker) -> None:
+        """An EXTRACTING row between two failures must keep the earlier count.
+
+        Without this, the count never passes one and a file that always fails is
+        retried on every run forever.
+        """
+        for expected in (1, 2, 3):
+            await tracker.update_state("/m/a.mkv", 1, 1.0, 10, STATUS_EXTRACTING)
+            previous = await tracker.get_state("/m/a.mkv")
+            assert previous is not None
+            await tracker.update_state(
+                "/m/a.mkv", 1, 1.0, 10, STATUS_FAILED, attempts=previous.attempts + 1
+            )
+            current = await tracker.get_state("/m/a.mkv")
+            assert current is not None
+            assert current.attempts == expected
+
+    @pytest.mark.asyncio
+    async def test_a_success_clears_the_count(self, tracker: StateTracker) -> None:
+        """A file that finally works starts its budget over."""
+        await tracker.update_state("/m/a.mkv", 1, 1.0, 10, STATUS_FAILED, attempts=2)
+        await tracker.update_state("/m/a.mkv", 1, 1.0, 10, STATUS_COMPLETED, "tiny.en", attempts=0)
+
+        state = await tracker.get_state("/m/a.mkv")
+        assert state is not None
+        assert state.attempts == 0
+        assert state.model_used == "tiny.en"
+
+    @pytest.mark.asyncio
+    async def test_a_new_row_starts_at_zero(self, tracker: StateTracker) -> None:
+        """The column is NOT NULL, so a fresh row must still insert."""
+        await tracker.update_state("/m/new.mkv", 1, 1.0, 10, STATUS_EXTRACTING)
+        state = await tracker.get_state("/m/new.mkv")
+        assert state is not None
+        assert state.attempts == 0
+
+
+class TestConcurrentWrites:
+    """One connection serves every task, so writes must not interleave."""
+
+    @pytest.mark.asyncio
+    async def test_a_batch_and_a_single_write_do_not_collide(self, tracker: StateTracker) -> None:
+        """A single write must not land inside another task's transaction."""
+        batch = [
+            build_row(f"/m/batch{index}.mkv", index, 0, 1.0, 100, STATUS_COMPLETED)
+            for index in range(200)
+        ]
+
+        await asyncio.gather(
+            tracker.update_states(batch),
+            *(
+                tracker.update_state(f"/m/single{index}.mkv", index, 1.0, 10, STATUS_COMPLETED)
+                for index in range(20)
+            ),
+        )
+
+        records = await tracker.get_skip_records()
+        assert len(records) == 220
 
 
 class TestStaleRecovery:

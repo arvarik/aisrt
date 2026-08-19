@@ -194,7 +194,30 @@ async def _drain_pcm(stdout: asyncio.StreamReader, duration: float | None) -> np
 
     if carry:
         logger.debug("Discarding a trailing partial PCM sample.")
+
+    # Return a view, not a copy. Copying would briefly hold both arrays and
+    # raise peak memory by half again. The caller uses resident_bytes() to
+    # account for the tail that the view keeps alive.
     return buffer[:written]
+
+
+def resident_bytes(audio: np.ndarray) -> int:
+    """Report the memory an array actually holds.
+
+    A slice of a larger buffer is a view. Its ``nbytes`` counts only the visible
+    samples, while the whole allocation stays resident until the view is dropped,
+    so the memory budget must account for the base.
+
+    Args:
+        audio: The array to measure.
+
+    Returns:
+        The size in bytes of the allocation that keeps this array alive.
+    """
+    base = audio.base
+    if isinstance(base, np.ndarray):
+        return int(base.nbytes)
+    return int(audio.nbytes)
 
 
 def _initial_capacity(duration: float | None) -> int:

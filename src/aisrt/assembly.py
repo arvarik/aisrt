@@ -180,10 +180,13 @@ _ABBREVIATIONS = frozenset(
     ]
 )
 
+_MAX_FILENAME_BYTES = 255
+"""The name limit on ext4, APFS, XFS, NTFS, and most network shares."""
+
 _INITIAL_RE = re.compile(r"^[A-Z]\.$")
 _DOTTED_RE = re.compile(r"^(?:[A-Za-z]\.){2,}$")
 _DECIMAL_RE = re.compile(r"^\d+(?:\.\d+)*\.$")
-_LANGUAGE_CODE_RE = re.compile(r"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")
+_LANGUAGE_CODE_RE = re.compile(r"\A[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*\Z")
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +202,9 @@ class SubtitleStyle:
     gap_snap_max: float = 0.5
     silence_split: float = 0.5
     lead_out: float = 0.5
+    lead_in: float = 0.12
+    """How far a cue may start before its first word. Netflix allows one or two
+    frames. More than that shows the text before the actor speaks."""
 
     @property
     def max_block_chars(self) -> int:
@@ -432,14 +438,17 @@ class SRTFormatter:
         best_index: int | None = None
         best_score = float("-inf")
         for index in range(1, count):
-            left, right = words[:index], words[index:]
-            if _char_count(left) > self.style.max_block_chars:
+            if _char_count(words[:index]) > self.style.max_block_chars:
+                # The left piece is already over budget. A single word longer
+                # than one cue makes this true at index 1, so keep the first
+                # candidate rather than abandoning the split: one oversized word
+                # must not force the whole sentence into a single cue.
+                if best_index is None:
+                    best_index = index
                 break
-            if min(len(left), len(right)) < 1:
-                continue
             score = _split_score(words, index)
             score -= abs(index - ideal) * 3.0
-            if _char_count(right) > self.style.max_block_chars:
+            if _char_count(words[index:]) > self.style.max_block_chars:
                 score -= 5.0
             if score > best_score:
                 best_score = score
@@ -512,6 +521,7 @@ class SRTFormatter:
         for index, cue in enumerate(cues):
             floor = cues[index - 1].end + style.min_gap if index else 0.0
             ceiling = cues[index + 1].start - style.min_gap if index + 1 < len(cues) else None
+            spoken_start = cue.start
 
             cue.start = max(cue.start, floor, 0.0)
             cue.end = max(cue.end, cue.start)
@@ -528,7 +538,10 @@ class SRTFormatter:
                 target = cue.start + wanted
                 cue.end = target if ceiling is None else min(target, max(ceiling, cue.end))
             if cue.duration < wanted:
-                cue.start = max(floor, cue.end - wanted)
+                # Pull the in-time earlier only within the lead-in allowance.
+                # Beyond that the subtitle would appear before it is spoken.
+                earliest = max(floor, spoken_start - style.lead_in, 0.0)
+                cue.start = max(earliest, cue.end - wanted)
             if cue.duration > style.max_duration:
                 cue.end = cue.start + style.max_duration
             if cue.end <= cue.start:
@@ -545,7 +558,8 @@ class SRTFormatter:
                 continue
             # Netflix chaining: any gap under half a second closes to exactly
             # the minimum gap, which removes the flicker between neighbours.
-            current.end = max(following.start - style.min_gap, current.start + 0.001)
+            target = min(following.start - style.min_gap, current.start + style.max_duration)
+            current.end = max(target, current.start + 0.001)
 
 
 def _flatten_segments(segments: Iterable[Any]) -> Iterator[Word]:
@@ -729,6 +743,39 @@ def sidecar_path(video: Path, language_code: str = "en", flags: Sequence[str] = 
     return video.with_name(".".join([base, language_code, *flags, "srt"]))
 
 
+def _write_all(fd: int, payload: bytes) -> None:
+    """Write every byte, because one os.write call may write only part of it.
+
+    Args:
+        fd: An open file descriptor.
+        payload: The bytes to write.
+
+    Raises:
+        OSError: If the descriptor stops accepting data before the end.
+    """
+    written = 0
+    while written < len(payload):
+        count = os.write(fd, payload[written:])
+        if count <= 0:
+            raise OSError(f"Wrote only {written} of {len(payload)} bytes")
+        written += count
+
+
+def _temp_path(source_video: Path) -> Path:
+    """Build a hidden temporary path next to the video.
+
+    The uuid adds 38 characters to the name. Most filesystems cap a name at 255
+    bytes, so the stem is trimmed to leave room rather than failing with
+    ``ENAMETOOLONG`` on a long release name.
+    """
+    suffix = f".{uuid.uuid4().hex}.srt.tmp"
+    budget = _MAX_FILENAME_BYTES - len(suffix.encode()) - 1
+    stem = source_video.stem
+    while len(stem.encode()) > budget and stem:
+        stem = stem[:-1]
+    return source_video.with_name(f".{stem}{suffix}")
+
+
 class AtomicWriter:
     """Writes subtitle files with a crash-safe rename and inherited ownership."""
 
@@ -752,7 +799,7 @@ class AtomicWriter:
             RuntimeError: If the write or the rename fails.
         """
         final_path = sidecar_path(source_video, language_code)
-        temp_path = source_video.with_name(f".{source_video.stem}.{uuid.uuid4().hex}.srt.tmp")
+        temp_path = _temp_path(source_video)
 
         logger.debug(f"Writing subtitle to temporary file {temp_path.name}")
         payload = srt_content.encode("utf-8")
@@ -760,22 +807,33 @@ class AtomicWriter:
         try:
             fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                os.write(fd, payload)
+                _write_all(fd, payload)
                 os.fsync(fd)
             finally:
                 os.close(fd)
 
             AtomicWriter._inherit_metadata(source_video, temp_path)
-            os.replace(temp_path, final_path)
-            AtomicWriter._sync_directory(final_path.parent)
-            logger.info(f"Wrote {final_path.name}")
-            return final_path
         except Exception as error:
             with contextlib.suppress(OSError):
                 temp_path.unlink(missing_ok=True)
             raise RuntimeError(
                 f"Atomic subtitle write failed for {source_video.name}: {error}"
             ) from error
+
+        try:
+            os.replace(temp_path, final_path)
+        except OSError as error:
+            with contextlib.suppress(OSError):
+                temp_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Could not commit the subtitle for {source_video.name}: {error}"
+            ) from error
+
+        # The file is committed. A failure past this point is not a write failure,
+        # so it must not be reported as one.
+        AtomicWriter._sync_directory(final_path.parent)
+        logger.info(f"Wrote {final_path.name}")
+        return final_path
 
     @staticmethod
     def _inherit_metadata(source_video: Path, temp_path: Path) -> None:

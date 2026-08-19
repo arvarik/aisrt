@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from loguru import logger
 
@@ -97,8 +97,11 @@ def iter_media_files(
                                     continue
                                 visited.add(key)
                             stack.append(entry.path)
-                        elif os.path.splitext(name)[1] in extensions:
-                            stat = entry.stat(follow_symlinks=False)
+                        elif os.path.splitext(name)[1] in extensions and entry.is_file():
+                            # is_file() follows the link and rejects a FIFO, a
+                            # socket, and a broken symlink. stat() then describes
+                            # the target, so size and inode identify real content.
+                            stat = entry.stat()
                             yield MediaFile(
                                 path=Path(entry.path),
                                 size=stat.st_size,
@@ -136,14 +139,11 @@ class DiscoveryEngine:
         self.target_languages = normalize_languages(config.target_languages)
         self.extensions = frozenset(config.extensions)
         self.exclude_patterns = tuple(config.exclude_patterns)
-        self._probe_semaphore = asyncio.Semaphore(max(1, probe_concurrency))
-        # The walk runs on one thread because it drives a single generator. The
-        # sidecar checks get their own pool, so a batch of stat calls cannot hold
-        # the crawl back.
-        self._crawl_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aisrt-crawl")
-        self._stat_pool = ThreadPoolExecutor(
-            max_workers=max(1, probe_concurrency), thread_name_prefix="aisrt-stat"
-        )
+        self.probe_concurrency = max(1, probe_concurrency)
+        self._probe_semaphore = asyncio.Semaphore(self.probe_concurrency)
+        # The pools are created per scan, so one engine can be scanned again.
+        self._crawl_pool: ThreadPoolExecutor | None = None
+        self._stat_pool: ThreadPoolExecutor | None = None
 
     async def scan(self) -> AsyncGenerator[tuple[MediaFile, str], None]:
         """Crawl the directory and report what to do with each file.
@@ -157,6 +157,13 @@ class DiscoveryEngine:
             or a string that starts with ``SKIP: ``.
         """
         logger.info(f"Scanning {self.media_dir}")
+        # The walk drives one generator, so it needs a single thread. The sidecar
+        # checks get their own pool, so a batch of stat calls cannot hold the
+        # crawl back.
+        self._crawl_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aisrt-crawl")
+        self._stat_pool = ThreadPoolExecutor(
+            max_workers=self.probe_concurrency, thread_name_prefix="aisrt-stat"
+        )
         skip_records = await self.state_tracker.get_skip_records(str(self.media_dir))
         processed_identities = await self.state_tracker.get_all_processed_hardlinks()
         now = time.time()
@@ -166,7 +173,7 @@ class DiscoveryEngine:
         )
         loop = asyncio.get_running_loop()
         found = 0
-        pending_rows: list[tuple[object, ...]] = []
+        pending_rows: list[dict[str, Any]] = []
 
         try:
             while True:
@@ -207,6 +214,8 @@ class DiscoveryEngine:
                 await self.state_tracker.update_states(pending_rows)
             self._crawl_pool.shutdown(wait=False)
             self._stat_pool.shutdown(wait=False)
+            self._crawl_pool = None
+            self._stat_pool = None
             logger.info(f"Scan finished. {found} media file(s) examined.")
 
     async def _analyze_file(

@@ -61,4 +61,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Every documented `AISRT_*` environment variable was ignored.
 - The command exited with status 0 even when every file failed.
 - `aisrt.__version__` reported a stale hardcoded value.
+- A cue could appear up to a second before the words were spoken, because
+  stretching it to a readable length moved the in-time backwards without bound.
+- A single token longer than one cue collapsed the whole sentence into one cue.
+- Closing a gap between cues could push one past the seven second maximum.
+- The retry budget never took effect. Recording progress reset the attempt
+  count, so a file that always failed was retried on every run forever.
+- Passing one hardware option silenced every `AISRT_HARDWARE__*` variable,
+  because a constructed nested model replaces the whole section instead of
+  merging with it.
+- `aisrt --version` emitted terminal colour codes, so a script could not parse it.
+- Symlinked media files were measured by the link rather than the target, and
+  named pipes, sockets, and broken symlinks entered the pipeline.
+- Scanning `/media/movies` also loaded database rows for `/media/movies2`.
+- Two tasks sharing the connection could interleave inside one transaction.
+- A short `os.write` committed a truncated subtitle.
+- A long release name made the temporary file exceed the filename limit.
+- A failure after the rename was reported as a write failure for a file that had
+  in fact been written correctly.
+- The memory budget counted the visible slice rather than the buffer that stays
+  resident behind it, so it under-counted by up to half.
+- Shutting down during a transcription raised a confusing error. The worker now
+  stops at the next segment boundary instead.
 

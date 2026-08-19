@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 import pytest
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+"""Matches the colour codes Rich writes when it thinks it has a terminal."""
+
+
+def strip_ansi(text: str) -> str:
+    """Remove terminal colour codes so help text can be matched literally."""
+    return ANSI_ESCAPE.sub("", text)
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +32,14 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         if name.startswith("AISRT_") or name in {"HF_TOKEN", "XDG_CONFIG_HOME"}:
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+    # Rich decides colour and width from the terminal it detects. Pinning both
+    # keeps help-text assertions stable whether the suite runs in a shell, in an
+    # editor, or in continuous integration.
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("LINES", "50")
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("TERM", "dumb")
 
 
 def ffmpeg_installed() -> bool:

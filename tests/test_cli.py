@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,8 +15,15 @@ from aisrt import __version__
 from aisrt.cli import EXIT_CONFIG, EXIT_FAILURES, EXIT_OK, app, build_config, configure_threading
 from aisrt.hardware import ModelConfig
 from aisrt.pipeline import PipelineStats
+from tests.conftest import strip_ansi
 
 runner = CliRunner()
+
+
+def help_text(*args: str) -> str:
+    """Return help output with colour and line wrapping removed."""
+    result = runner.invoke(app, [*args, "--help"])
+    return re.sub(r"[\s│]+", "", strip_ansi(result.stdout))
 
 
 @pytest.fixture
@@ -38,24 +46,22 @@ class TestTopLevel:
 
     def test_help(self) -> None:
         """Both commands appear in the help output."""
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == EXIT_OK
-        assert "scan" in result.stdout
-        assert "run" in result.stdout
+        assert runner.invoke(app, ["--help"]).exit_code == EXIT_OK
+        text = help_text()
+        assert "scan" in text
+        assert "run" in text
 
     def test_version(self) -> None:
         """The reported version comes from the package, not a hardcoded string."""
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == EXIT_OK
-        assert __version__ in result.stdout
-        assert "0.1.0" not in result.stdout or __version__ == "0.1.0"
+        assert __version__ in strip_ansi(result.stdout)
 
     @pytest.mark.parametrize("command", ["scan", "run"])
     def test_command_help(self, command: str) -> None:
         """Each command documents its options."""
-        result = runner.invoke(app, [command, "--help"])
-        assert result.exit_code == EXIT_OK
-        assert "--verbose" in result.stdout
+        assert runner.invoke(app, [command, "--help"]).exit_code == EXIT_OK
+        assert "--verbose" in help_text(command)
 
 
 class TestDocumentedOptions:
@@ -91,8 +97,7 @@ class TestDocumentedOptions:
     @pytest.mark.parametrize("option", ["--min-age-mins", "--ext", "--exclude", "--db-path"])
     def test_scan_options(self, option: str) -> None:
         """The scan command accepts the documented option."""
-        result = runner.invoke(app, ["scan", "--help"])
-        assert option in result.stdout
+        assert option.replace(" ", "") in help_text("scan")
 
 
 class TestConfigurationErrors:
@@ -161,6 +166,30 @@ class TestBuildConfig:
         assert config.filters.min_age_mins == 5
         assert config.filters.target_languages == ["fr"]
         assert config.subtitles.max_chars_per_line == 37
+
+    def test_a_typed_option_keeps_the_rest_of_its_section(
+        self, monkeypatch: pytest.MonkeyPatch, library: Path
+    ) -> None:
+        """Passing one hardware option must not silence the others.
+
+        A constructed nested model replaces the whole sub-tree. Passing a mapping
+        lets pydantic-settings merge it with the matching environment variables.
+        """
+        monkeypatch.setenv("AISRT_HARDWARE__FORCE_MODEL", "large-v3")
+        monkeypatch.setenv("AISRT_FILTERS__MIN_AGE_MINS", "44")
+
+        config = build_config(library, force_device="cpu", languages=["fr"])
+
+        assert config.hardware.force_device == "cpu"
+        assert config.hardware.force_model == "large-v3"
+        assert config.filters.target_languages == ["fr"]
+        assert config.filters.min_age_mins == 44
+
+    def test_the_version_output_is_machine_readable(self) -> None:
+        """A script parsing the version must not receive terminal markup."""
+        result = runner.invoke(app, ["--version"])
+        assert "\x1b[" not in result.stdout, "Rich markup leaked into the version line"
+        assert result.stdout.strip().startswith("aisrt ")
 
     def test_a_batch_size_turns_batching_on(self, library: Path) -> None:
         """Asking for throughput switches off the accuracy preference."""

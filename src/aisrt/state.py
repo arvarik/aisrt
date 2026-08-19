@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
+import os
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeVar, cast
@@ -42,18 +44,23 @@ _FINISHED_IDENTITY_SQL: Final = (
 )
 _RESET_STALE_SQL: Final = "UPDATE file_state SET status = ? WHERE status IN (?, ?)"
 
+# Named parameters, because :attempts and :model_used are each read twice: once
+# for a fresh row and once to decide whether an update keeps the stored value.
 _UPSERT_SQL: Final = """
     INSERT INTO file_state (
         file_path, inode, device, mtime, size, status, model_used, attempts, timestamp
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ) VALUES (
+        :file_path, :inode, :device, :mtime, :size, :status, :model_used,
+        COALESCE(:attempts, 0), CURRENT_TIMESTAMP
+    )
     ON CONFLICT(file_path) DO UPDATE SET
         inode=excluded.inode,
         device=excluded.device,
         mtime=excluded.mtime,
         size=excluded.size,
         status=excluded.status,
-        model_used=COALESCE(excluded.model_used, file_state.model_used),
-        attempts=excluded.attempts,
+        model_used=COALESCE(:model_used, file_state.model_used),
+        attempts=COALESCE(:attempts, file_state.attempts),
         timestamp=CURRENT_TIMESTAMP
 """
 
@@ -137,6 +144,10 @@ class StateTracker:
         self.db_path = db_path
         self.busy_timeout_ms = busy_timeout_ms
         self._conn: aiosqlite.Connection | None = None
+        # One connection serves every task. Without this lock another task can
+        # issue a statement between BEGIN IMMEDIATE and COMMIT and join a
+        # transaction it knows nothing about.
+        self._write_lock = asyncio.Lock()
 
     async def __aenter__(self) -> StateTracker:
         """Open the connection."""
@@ -351,8 +362,11 @@ class StateTracker:
         query = "SELECT file_path, status, size, mtime, attempts FROM file_state"
         params: tuple[Any, ...] = ()
         if path_prefix:
+            # Match on a directory boundary. A bare prefix would also pull in a
+            # sibling such as "/media/movies2" when scanning "/media/movies".
+            directory = path_prefix.rstrip(os.sep) + os.sep
+            escaped = directory.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             query += " WHERE file_path LIKE ? ESCAPE '\\'"
-            escaped = path_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params = (f"{escaped}%",)
         async with self._connection().execute(query, params) as cursor:
             rows = await cursor.fetchall()
@@ -384,7 +398,7 @@ class StateTracker:
         status: str,
         model_used: str | None = None,
         device: int = 0,
-        attempts: int = 0,
+        attempts: int | None = None,
     ) -> None:
         """Insert or update the state of one media file.
 
@@ -398,42 +412,41 @@ class StateTracker:
                 the value already stored, so an intermediate transition does not
                 erase it.
             device: The device the file lives on.
-            attempts: How many times the pipeline has tried this file.
+            attempts: How many times the pipeline has tried this file. Passing
+                None keeps the stored count, so recording progress does not erase
+                the history of earlier failures.
         """
         conn = self._connection()
-        await conn.execute(
-            _UPSERT_SQL,
-            (file_path, inode, device, mtime, size, status, model_used, attempts),
-        )
-        await conn.commit()
+        row = build_row(file_path, inode, device, mtime, size, status, model_used, attempts)
+        async with self._write_lock:
+            await conn.execute(_UPSERT_SQL, row)
 
     @require_conn
-    async def update_states(self, rows: Sequence[tuple[Any, ...]]) -> None:
+    async def update_states(self, rows: Sequence[Mapping[str, Any]]) -> None:
         """Insert or update many rows in one transaction.
 
         Args:
-            rows: Tuples of ``(file_path, inode, device, mtime, size, status,
-                model_used, attempts)``.
+            rows: Mappings as produced by :func:`build_row`.
         """
         if not rows:
             return
         conn = self._connection()
-        await conn.execute("BEGIN IMMEDIATE")
-        try:
-            await conn.executemany(_UPSERT_SQL, rows)
-        except BaseException:
-            await conn.rollback()
-            raise
-        await conn.commit()
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await conn.executemany(_UPSERT_SQL, rows)
+            except BaseException:
+                await conn.rollback()
+                raise
+            await conn.commit()
 
     @require_conn
     async def reset_stale_states(self) -> None:
         """Return files left mid-flight by a crash to the pending state."""
         conn = self._connection()
         params = (STATUS_PENDING, *TRANSIENT_STATUSES)
-        async with conn.execute(_RESET_STALE_SQL, params) as cursor:
+        async with self._write_lock, conn.execute(_RESET_STALE_SQL, params) as cursor:
             reset_count = cursor.rowcount
-        await conn.commit()
         if reset_count > 0:
             logger.info(f"Reset {reset_count} file(s) left mid-run by an earlier shutdown.")
 
@@ -454,13 +467,14 @@ class StateTracker:
         gone = [(str(row[0]),) for row in rows if str(row[0]) not in keep]
         if not gone:
             return 0
-        await conn.execute("BEGIN IMMEDIATE")
-        try:
-            await conn.executemany("DELETE FROM file_state WHERE file_path = ?", gone)
-        except BaseException:
-            await conn.rollback()
-            raise
-        await conn.commit()
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await conn.executemany("DELETE FROM file_state WHERE file_path = ?", gone)
+            except BaseException:
+                await conn.rollback()
+                raise
+            await conn.commit()
         logger.info(f"Removed {len(gone)} state row(s) for files that no longer exist.")
         return len(gone)
 
@@ -473,10 +487,34 @@ def build_row(
     size: int,
     status: str,
     model_used: str | None = None,
-    attempts: int = 0,
-) -> tuple[Any, ...]:
-    """Build one tuple in the order ``update_states`` expects."""
-    return (file_path, inode, device, mtime, size, status, model_used, attempts)
+    attempts: int | None = None,
+) -> dict[str, Any]:
+    """Build one parameter mapping for an upsert.
+
+    Args:
+        file_path: The absolute path of the media file.
+        inode: The inode of the file.
+        device: The device the file lives on.
+        mtime: The last modification time.
+        size: The size in bytes.
+        status: One of the ``STATUS_*`` constants.
+        model_used: The model that produced the subtitle, or None to keep the
+            stored value.
+        attempts: The attempt count, or None to keep the stored value.
+
+    Returns:
+        A mapping suitable for :data:`_UPSERT_SQL`.
+    """
+    return {
+        "file_path": file_path,
+        "inode": inode,
+        "device": device,
+        "mtime": mtime,
+        "size": size,
+        "status": status,
+        "model_used": model_used,
+        "attempts": attempts,
+    }
 
 
 def utc_now() -> str:

@@ -19,7 +19,7 @@ from rich.table import Table
 
 from aisrt import __version__
 from aisrt.assembly import SRTFormatter, SubtitleStyle
-from aisrt.config import AppConfig, FilterConfig, HardwareConfig, SubtitleConfig
+from aisrt.config import AppConfig, SubtitleConfig
 from aisrt.discovery import ACTION_PROCESS, DiscoveryEngine
 from aisrt.hardware import HardwareProfiler, ModelConfig, ModelRouter
 from aisrt.pipeline import Pipeline, PipelineStats, ProgressReporter
@@ -147,19 +147,24 @@ def build_config(
             "max_memory_mb": max_memory_mb,
         }
     )
+    # Pass mappings, not model instances. pydantic-settings merges a mapping
+    # with the matching environment sub-tree, while a constructed model replaces
+    # it wholesale and would silence every AISRT_HARDWARE__* variable the moment
+    # one hardware option is typed.
     if hardware:
-        top_level["hardware"] = HardwareConfig(**hardware)
+        top_level["hardware"] = hardware
     if filters:
-        top_level["filters"] = FilterConfig(**filters)
+        top_level["filters"] = filters
     if subtitles:
-        top_level["subtitles"] = SubtitleConfig(**subtitles)
+        top_level["subtitles"] = subtitles
     return AppConfig(media_dir=media_dir, **top_level)
 
 
 def _version_callback(value: bool) -> None:
     """Print the version and exit."""
     if value:
-        console.print(f"aisrt {__version__}")
+        # Rich would colour and highlight this, which breaks a script parsing it.
+        console.print(f"aisrt {__version__}", highlight=False)
         raise typer.Exit
 
 
@@ -245,7 +250,7 @@ async def _run_scan(config: AppConfig, limit: int) -> int:
 
     async with StateTracker(config.db_path) as tracker:
         engine = DiscoveryEngine(config.media_dir, config.filters, tracker)
-        with _spinner("Scanning...") as progress:
+        with _spinner() as progress:
             task = progress.add_task("Scanning...", total=None)
             async for media_file, action in engine.scan():
                 size_mb = media_file.size / (1024 * 1024)
@@ -484,7 +489,7 @@ async def _live_progress(reporter: ProgressReporter) -> Any:
                 await refresher
 
 
-def _spinner(description: str) -> Progress:
+def _spinner() -> Progress:
     """Build a lightweight spinner for the scan command."""
     return Progress(
         SpinnerColumn(),

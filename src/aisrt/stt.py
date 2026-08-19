@@ -110,6 +110,11 @@ class STTWorker:
         self.model: WhisperModel | BatchedInferencePipeline | None = None
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aisrt-stt")
         self._lock = threading.Lock()
+        self._closed = False
+        # The worker thread checks this between segments. Without it, close()
+        # would either abandon a running decode or wait out the whole file,
+        # which can exceed a service manager's stop timeout.
+        self._stop = threading.Event()
 
     @property
     def model_name(self) -> str:
@@ -138,10 +143,17 @@ class STTWorker:
     def initialize(self) -> None:
         """Load the model onto the configured device.
 
-        Calling this twice is a no-op, so a watch-mode restart reuses the model
-        already resident in memory.
+        Calling this twice without an intervening close is a no-op, so a
+        watch-mode rescan reuses the model already resident in memory.
+
+        Raises:
+            RuntimeError: If the worker was already closed. Build a new one.
         """
         with self._lock:
+            if self._closed:
+                raise RuntimeError(
+                    "This STTWorker was closed and cannot be reused. Create a new one."
+                )
             if self.model is not None:
                 return
             self._login_to_huggingface()
@@ -208,8 +220,11 @@ class STTWorker:
             The language code and its probability. ``(None, 0.0)`` when
             detection failed.
         """
+        # A missing model is a wiring error, so it propagates. Only a detection
+        # failure falls back to per-window detection inside transcribe().
+        model = self._base_model()
         try:
-            language, probability, _ = self._base_model().detect_language(
+            language, probability, _ = model.detect_language(
                 audio,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 1000, "speech_pad_ms": 200},
@@ -245,29 +260,47 @@ class STTWorker:
         Raises:
             RuntimeError: If the model is not loaded.
         """
-        if self.model is None:
+        # Read the reference once. close() may null it from another thread, and
+        # a half-finished call must not fail with an attribute error.
+        model = self.model
+        if model is None:
             raise RuntimeError("The Whisper model is not loaded. Call initialize() first.")
 
         options = build_transcribe_options(
-            batched=self.batched,
+            batched=isinstance(model, BatchedInferencePipeline),
             translate=translate,
             language=language,
             batch_size=self.config.batch_size,
         )
-        segments, info = self.model.transcribe(audio, **options)
+        segments, info = model.transcribe(audio, **options)
 
         if on_progress is None:
             return segments, float(info.duration)
 
         def _tracked() -> Iterator[Any]:
             for segment in segments:
+                if self._stop.is_set():
+                    # A shutdown asked us to stop. Ending the generator lets the
+                    # caller unwind cleanly instead of blocking the exit.
+                    logger.debug("Shutdown requested mid-transcription. Stopping early.")
+                    return
                 on_progress(float(segment.end))
                 yield segment
 
         return _tracked(), float(info.duration)
 
     def close(self) -> None:
-        """Release the model and shut the worker thread down."""
+        """Stop any running transcription, then release the model and the thread.
+
+        The stop flag is set first so a decode already in progress unwinds at its
+        next segment boundary. The model reference is dropped only after the
+        executor has been told to stop, so a call that is still running does not
+        fail with a confusing "model is not loaded" error.
+        """
         with self._lock:
-            self.model = None
+            if self._closed:
+                return
+            self._closed = True
+            self._stop.set()
             self.executor.shutdown(wait=False, cancel_futures=True)
+            self.model = None

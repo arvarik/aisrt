@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Final
 
@@ -13,7 +14,7 @@ from loguru import logger
 
 from aisrt.assembly import AtomicWriter, SRTFormatter
 from aisrt.discovery import ACTION_PROCESS, DiscoveryEngine, MediaFile
-from aisrt.extractor import SAMPLE_RATE, AudioExtractor
+from aisrt.extractor import SAMPLE_RATE, AudioExtractor, resident_bytes
 from aisrt.state import (
     STATUS_COMPLETED,
     STATUS_EXTRACTING,
@@ -69,8 +70,12 @@ class InferenceJob:
 
     @property
     def nbytes(self) -> int:
-        """Bytes of memory the decoded audio occupies."""
-        return int(self.audio_data.nbytes)
+        """Bytes of memory the decoded audio keeps resident.
+
+        The array is a view of a larger buffer, so the visible size understates
+        what the process is actually holding.
+        """
+        return resident_bytes(self.audio_data)
 
 
 class MemoryBudget:
@@ -200,8 +205,10 @@ class Pipeline:
 
     async def _produce(self) -> None:
         """Crawl the library and queue the files that need a subtitle."""
-        try:
-            async for media_file, action in self.discovery.scan():
+        # aclosing runs the scanner's own cleanup at the break, so its final
+        # state rows are flushed while the database is still open.
+        async with aclosing(self.discovery.scan()) as scan:
+            async for media_file, action in scan:
                 self.stats.files_scanned += 1
                 if action != ACTION_PROCESS:
                     self.stats.files_skipped += 1
@@ -210,10 +217,12 @@ class Pipeline:
                     logger.info("Shutdown requested. The producer stops queueing new files.")
                     break
                 await self.extraction_queue.put(media_file)
-        finally:
-            # Every extractor takes exactly one sentinel and then exits.
-            for _ in range(self.extractor_count):
-                await self.extraction_queue.put(None)
+
+        # Sentinels are sent only after a clean crawl. If this task raises or is
+        # cancelled the TaskGroup cancels the extractors anyway, and putting onto
+        # a queue nobody is draining would wedge the shutdown.
+        for _ in range(self.extractor_count):
+            await self.extraction_queue.put(None)
 
     async def _extract(self, worker_id: int) -> None:
         """Decode audio into memory and hand it to the inference worker."""
@@ -238,7 +247,7 @@ class Pipeline:
                     timeout=self.extract_timeout_secs,
                     duration=media_file.duration,
                 )
-                actual = int(audio.nbytes)
+                actual = resident_bytes(audio)
                 await self.budget.adjust(actual - reserved)
                 reserved = actual
 
@@ -363,10 +372,15 @@ class Pipeline:
     ) -> None:
         """Record a state transition. A database error never stops the run."""
         try:
-            attempts = 0
+            # None keeps the stored count. Only a failure increments it, and only
+            # a success clears it, so a file that keeps failing eventually stops
+            # being retried.
+            attempts: int | None = None
             if count_attempt:
                 existing = await self.state.get_state(str(media_file.path))
                 attempts = (existing.attempts if existing else 0) + 1
+            elif status in {STATUS_COMPLETED, STATUS_NO_SPEECH}:
+                attempts = 0
             await self.state.update_state(
                 file_path=str(media_file.path),
                 inode=media_file.inode,
